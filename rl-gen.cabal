@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 7391ee114d7c0f1ca3cfe37b28c03bfc508df42e927fc82f77d347087080e4e8
+-- hash: 95b20704c60c1919400ed70a1878c736dff0d5d5643e48a3906af5d0afbff676
 
 name:           rl-gen
 version:        0.1.0.0
@@ -27,13 +27,19 @@ source-repository head
 
 library
   exposed-modules:
+      BST
       Gen
+      MCCGen
   other-modules:
       Paths_rl_gen
   hs-source-dirs:
       src
   build-depends:
       base >=4.7 && <5
+    , containers
+    , data-default
+    , lens
+    , random
   default-language: Haskell2010
 
 executable rl-gen-exe
@@ -45,6 +51,10 @@ executable rl-gen-exe
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , containers
+    , data-default
+    , lens
+    , random
     , rl-gen
   default-language: Haskell2010
 
@@ -58,5 +68,9 @@ test-suite rl-gen-test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , containers
+    , data-default
+    , lens
+    , random
     , rl-gen
   default-language: Haskell2010
