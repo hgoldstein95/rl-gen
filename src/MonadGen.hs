@@ -1,3 +1,11 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
+
 module MonadGen where
 
 import Control.Monad (filterM, replicateM)
@@ -109,3 +117,9 @@ vectorOf = replicateM
 
 infiniteListOf :: MonadGen g => g a -> g [a]
 infiniteListOf gen = sequence (repeat gen)
+
+type SelectId = String
+
+class Select s where
+  type Ctx s :: *
+  select :: SelectId -> Ctx s -> [s a] -> s a

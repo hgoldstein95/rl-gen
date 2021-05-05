@@ -28,6 +28,10 @@ dependencies:
 - deepseq
 - mtl
 
+ghc-options:
+  - -Wall
+  - -Werror
+
 library:
   source-dirs: src
 

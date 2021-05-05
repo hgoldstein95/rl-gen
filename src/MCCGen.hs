@@ -7,24 +7,25 @@
 
 module MCCGen where
 
-import Control.Arrow (Arrow (second))
-import Control.Lens (at, ix, makeLenses, non, over, set, view, (%%=), (%=), (^.), _3)
-import Control.Monad (ap, filterM, replicateM)
-import Control.Monad.Fix (MonadFix (..))
-import Control.Monad.State (MonadState (..), gets, modify)
+import Control.Lens
+  ( At (at),
+    Field3 (_3),
+    Ixed (ix),
+    makeLenses,
+    non,
+    over,
+    set,
+    view,
+    (%=),
+    (^.),
+  )
+import Control.Monad.State (MonadState (..), gets)
 import Data.Default (Default (..))
-import Data.List (sortBy)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromJust, isJust)
 import qualified Data.Maybe as Maybe
-import Data.Ord (comparing)
-import Debug.Trace (traceShowId)
-import GHC.Generics (Generic)
-import Gen (Gen (MkGen), Select (..), SelectId)
-import qualified Gen
-import MonadGen (MonadGen (..), elements, frequency, uniform)
-import System.Random (Random (..), RandomGen (..), StdGen, newStdGen)
+import LGen (LGen (..))
+import MonadGen (MonadGen (choose), Select (..), SelectId, elements)
 
 type MCCContext = [String]
 
@@ -40,21 +41,21 @@ newtype MCCState = MCCState
   }
   deriving (Show, Eq)
 
-makeLenses ''MCCState
-makeLenses ''MCCLearner
-
-newtype MCCGen a = MCCGen {unMCC :: Gen MCCState a}
-  deriving (Functor, Applicative, Monad, MonadGen)
-
-instance MonadState MCCState MCCGen where
-  get = MCCGen get
-  put s = MCCGen (put s)
-
 instance Default MCCLearner where
   def = MCCLearner [] Map.empty Map.empty
 
 instance Default MCCState where
   def = MCCState Map.empty
+
+makeLenses ''MCCState
+makeLenses ''MCCLearner
+
+newtype MCCGen a = MCCGen {unMCC :: LGen MCCState a}
+  deriving (Functor, Applicative, Monad, MonadGen)
+
+instance MonadState MCCState MCCGen where
+  get = MCCGen get
+  put s = MCCGen (put s)
 
 instance Select MCCGen where
   type Ctx MCCGen = MCCContext
@@ -90,5 +91,5 @@ rewardOne selId rv = learners . at selId . non def %= rewardLearner
         aux ((s, a, r) : es) g l =
           let g' = g + r
               cTable' = over (at (s, a) . non 0) (+ 1) (l ^. cTable)
-              qTable' = over (at (s, a) . non 0) (\q -> q + (1 / fromJust (cTable' ^. at (s, a))) * (g' - q)) (l ^. qTable)
+              qTable' = over (at (s, a) . non 0) (\q -> q + (1 / Maybe.fromJust (cTable' ^. at (s, a))) * (g' - q)) (l ^. qTable)
            in aux es g' (MCCLearner es qTable' cTable')

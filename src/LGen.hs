@@ -6,23 +6,13 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
 
-module Gen where
+module LGen where
 
-import Control.Lens (makeLenses, over, view, (^.))
-import Control.Monad (ap, filterM, replicateM)
-import Control.Monad.Fix (MonadFix (..))
+import Control.Monad (ap)
 import Control.Monad.State (MonadState (..))
 import Data.Default (Default (..))
-import Data.List (sortBy)
-import Data.Map (Map)
-import qualified Data.Map as Map
-import Data.Maybe (fromJust, isJust)
-import qualified Data.Maybe as Maybe
-import Data.Ord (comparing)
-import MonadGen (MonadGen (..), uniform)
+import MonadGen (MonadGen (..), Select (..), uniform)
 import System.Random (Random (..), RandomGen (..), StdGen, newStdGen)
-
-type SelectId = String
 
 newtype QCGen = QCGen StdGen
 
@@ -40,9 +30,9 @@ instance RandomGen QCGen where
         case f g of
           (x, g') -> (x, QCGen g')
 
-newtype Gen s a = MkGen {unGen :: s -> QCGen -> Int -> (a, s)}
+newtype LGen s a = MkGen {unGen :: s -> QCGen -> Int -> (a, s)}
 
-instance Functor (Gen s) where
+instance Functor (LGen s) where
   fmap f (MkGen h) =
     MkGen
       ( \s r n ->
@@ -50,11 +40,11 @@ instance Functor (Gen s) where
            in (f x, s')
       )
 
-instance Applicative (Gen s) where
+instance Applicative (LGen s) where
   pure x = MkGen (\s _ _ -> (x, s))
   (<*>) = ap
 
-instance Monad (Gen s) where
+instance Monad (LGen s) where
   return = pure
   MkGen m >>= k =
     MkGen
@@ -66,19 +56,15 @@ instance Monad (Gen s) where
                in m' s' r2 n
       )
 
-class Select s where
-  type Ctx s :: *
-  select :: SelectId -> Ctx s -> [s a] -> s a
-
-instance Default s => Select (Gen s) where
-  type Ctx (Gen s) = ()
+instance Default s => Select (LGen s) where
+  type Ctx (LGen s) = ()
   select _ _ = uniform
 
-instance MonadState s (Gen s) where
+instance MonadState s (LGen s) where
   get = MkGen $ \s _ _ -> (s, s)
   put s = MkGen $ \_ _ _ -> ((), s)
 
-instance Default s => MonadGen (Gen s) where
+instance Default s => MonadGen (LGen s) where
   sized f = MkGen (\s r n -> let MkGen m = f n in m s r n)
 
   resize n _ | n < 0 = error "Test.QuickCheck.resize: negative size"

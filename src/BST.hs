@@ -1,10 +1,8 @@
 module BST where
 
 import qualified Data.Set as Set
-import Debug.Trace (traceShowId)
-import Gen (Select (..))
-import MCCGen (MCCContext (..), MCCGen (..), reward, (<:>))
-import MonadGen (MonadGen (generate, resize, sized), infiniteListOf)
+import MCCGen (MCCContext, MCCGen (..), reward, (<:>))
+import MonadGen (MonadGen (generate, resize, sized), Select (..), infiniteListOf)
 
 data BST
   = Node BST Int BST
@@ -17,6 +15,10 @@ toList (Node l x r) = toList l ++ [x] ++ toList r
 
 size :: BST -> Int
 size = length . toList
+
+isBST :: BST -> Bool
+isBST Leaf = True
+isBST (Node l x r) = all (< x) (toList l) && all (> x) (toList r) && isBST l && isBST r
 
 genTree :: MCCContext -> MCCGen BST
 genTree context = resize 4 $ sized (aux context)
@@ -35,10 +37,6 @@ genTree context = resize 4 $ sized (aux context)
             <*> pure i
             <*> aux ("RIGHT" <:> ctx') (depth - 1)
         ]
-
-isBST :: BST -> Bool
-isBST Leaf = True
-isBST (Node l x r) = all (< x) (toList l) && all (> x) (toList r) && isBST l && isBST r
 
 genTrees :: MCCGen [BST]
 genTrees = infiniteListOf (genTree [])
