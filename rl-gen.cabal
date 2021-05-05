@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 95b20704c60c1919400ed70a1878c736dff0d5d5643e48a3906af5d0afbff676
+-- hash: c2d807e0f4e86cea2ca407fe280b71e1730c0637e624104d2282ca930e10da73
 
 name:           rl-gen
 version:        0.1.0.0
@@ -30,6 +30,7 @@ library
       BST
       Gen
       MCCGen
+      MonadGen
   other-modules:
       Paths_rl_gen
   hs-source-dirs:
