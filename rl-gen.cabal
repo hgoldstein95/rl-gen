@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: c2d807e0f4e86cea2ca407fe280b71e1730c0637e624104d2282ca930e10da73
+-- hash: 669e41e226e0cdc22c9b37effdc01600e168ca1cf8615561b262b3b414ba5a93
 
 name:           rl-gen
 version:        0.1.0.0
@@ -39,7 +39,9 @@ library
       base >=4.7 && <5
     , containers
     , data-default
+    , deepseq
     , lens
+    , mtl
     , random
   default-language: Haskell2010
 
@@ -54,7 +56,9 @@ executable rl-gen-exe
       base >=4.7 && <5
     , containers
     , data-default
+    , deepseq
     , lens
+    , mtl
     , random
     , rl-gen
   default-language: Haskell2010
@@ -71,7 +75,9 @@ test-suite rl-gen-test
       base >=4.7 && <5
     , containers
     , data-default
+    , deepseq
     , lens
+    , mtl
     , random
     , rl-gen
   default-language: Haskell2010

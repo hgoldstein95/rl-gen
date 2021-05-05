@@ -25,6 +25,8 @@ dependencies:
 - data-default
 - containers
 - lens
+- deepseq
+- mtl
 
 library:
   source-dirs: src

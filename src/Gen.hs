@@ -1,4 +1,6 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -9,6 +11,7 @@ module Gen where
 import Control.Lens (makeLenses, over, view, (^.))
 import Control.Monad (ap, filterM, replicateM)
 import Control.Monad.Fix (MonadFix (..))
+import Control.Monad.State (MonadState (..))
 import Data.Default (Default (..))
 import Data.List (sortBy)
 import Data.Map (Map)
@@ -50,8 +53,6 @@ instance Functor (Gen s) where
 instance Applicative (Gen s) where
   pure x = MkGen (\s _ _ -> (x, s))
   (<*>) = ap
-  _ *> m = m
-  m <* _ = m
 
 instance Monad (Gen s) where
   return = pure
@@ -64,7 +65,6 @@ instance Monad (Gen s) where
                   MkGen m' = k x
                in m' s' r2 n
       )
-  (>>) = (*>)
 
 class Select s where
   type Ctx s :: *
@@ -74,14 +74,9 @@ instance Default s => Select (Gen s) where
   type Ctx (Gen s) = ()
   select _ _ = uniform
 
-get :: Gen s s
-get = MkGen $ \s _ _ -> (s, s)
-
-put :: s -> Gen s ()
-put s = MkGen $ \_ _ _ -> ((), s)
-
-update :: (s -> s) -> Gen s ()
-update f = MkGen $ \s _ _ -> ((), f s)
+instance MonadState s (Gen s) where
+  get = MkGen $ \s _ _ -> (s, s)
+  put s = MkGen $ \_ _ _ -> ((), s)
 
 instance Default s => MonadGen (Gen s) where
   sized f = MkGen (\s r n -> let MkGen m = f n in m s r n)

@@ -1,9 +1,10 @@
 module BST where
 
 import qualified Data.Set as Set
+import Debug.Trace (traceShowId)
 import Gen (Select (..))
-import MCCGen (MCCContext (..), MCCGen (..), ctxAppend, reward)
-import MonadGen (MonadGen (sized), infiniteListOf)
+import MCCGen (MCCContext (..), MCCGen (..), reward, (<:>))
+import MonadGen (MonadGen (generate, resize, sized), infiniteListOf)
 
 data BST
   = Node BST Int BST
@@ -14,23 +15,26 @@ toList :: BST -> [Int]
 toList Leaf = []
 toList (Node l x r) = toList l ++ [x] ++ toList r
 
+size :: BST -> Int
+size = length . toList
+
 genTree :: MCCContext -> MCCGen BST
-genTree context = sized (aux context)
+genTree context = resize 4 $ sized (aux context)
   where
     aux :: MCCContext -> Int -> MCCGen BST
     aux _ 0 = pure Leaf
-    aux ctx n =
+    aux ctx depth = do
+      i <- select "NODE_VAL" ctx (pure <$> [0 .. 10])
+      let ctx' = ("VAL(" ++ show i ++ ")") <:> ctx
       select
         "NODE_TYPE"
-        ctx
+        ctx'
         [ pure Leaf,
           Node
-            <$> aux (ctxAppend (-1) ctx) (n - 1)
-            <*> genInt ctx
-            <*> aux (ctxAppend (-2) ctx) (n - 1)
+            <$> aux ("LEFT" <:> ctx') (depth - 1)
+            <*> pure i
+            <*> aux ("RIGHT" <:> ctx') (depth - 1)
         ]
-
-    genInt ctx = select "NODE_VAL" ctx (pure <$> [1 .. 10])
 
 isBST :: BST -> Bool
 isBST Leaf = True
@@ -46,8 +50,21 @@ genBSTs = aux Set.empty
       t <- genTree []
       let bst = isBST t
           unique = not $ t `Set.member` s
-      case (bst, unique) of
-        (True, True) -> reward 20
-        (True, False) -> reward 0
-        _ -> reward (-1)
-      (t :) <$> aux (if bst then Set.insert t s else s)
+      reward $ case (bst, unique) of
+        (True, True) -> 20
+        (True, False) -> 0
+        _ -> -1
+      (t :) <$> aux (Set.insert t s)
+
+test :: Int -> IO ()
+test total = do
+  aux "RAND:" genTrees
+  aux "RL  :" genBSTs
+  where
+    aux n g = do
+      putStr n
+      ts <- filter isBST <$> generate (take total <$> g)
+      putStr $ " " ++ show (length ts) ++ " valid BSTs"
+      putStr $ ", " ++ show (length . Set.fromList $ ts) ++ " unique valid BSTs"
+      putStr $ ", " ++ show (maximum . map size $ ts) ++ " max size"
+      putStrLn ""
