@@ -20,7 +20,9 @@ import Control.Lens
     (%=),
     (^.),
   )
-import Control.Monad.State (MonadState (..), State, gets)
+import Control.Monad.Reader (MonadReader (..), ReaderT, runReaderT)
+import qualified Control.Monad.Reader as Reader
+import Control.Monad.State (MonadState (..), State, evalState, gets)
 import qualified Control.Monad.State as State
 import Data.Default (Default (..))
 import Data.Map (Map)
@@ -31,6 +33,7 @@ import GenT
     choose,
     elements,
   )
+import qualified GenT
 
 type SelectId = String
 
@@ -57,15 +60,23 @@ instance Default MCCLearner where
 instance Default MCCState where
   def = MCCState Map.empty
 
-type MCCGen = GenT (State MCCState)
+type MCCGen = GenT (ReaderT MCCContext (State MCCState))
+
+generate :: MCCGen a -> IO a
+generate = GenT.generate ((`evalState` def) . (`runReaderT` []))
 
 instance MonadState MCCState MCCGen where
   get = MkGenT (\_ _ -> State.get)
   put s = MkGenT (\_ _ -> State.put s)
 
-mccselect :: SelectId -> MCCContext -> [MCCGen a] -> MCCGen a
-mccselect selId ctx gs = do
+instance MonadReader MCCContext MCCGen where
+  ask = MkGenT (\_ _ -> Reader.ask)
+  local f (MkGenT g) = MkGenT (\s n -> Reader.local f (g s n))
+
+mccselect :: SelectId -> [MCCGen a] -> MCCGen a
+mccselect selId gs = do
   e <- choose (0 :: Int, 3)
+  ctx <- ask
   let idxs = [0 .. length gs - 1]
   c <-
     if e == 0

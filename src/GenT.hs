@@ -71,10 +71,10 @@ choose rng = MkGenT (\r _ -> let (x, _) = randomR rng r in pure x)
 chooseAny :: (Random a, Monad m) => GenT m a
 chooseAny = MkGenT (\r _ -> let (x, _) = random r in pure x)
 
-generate :: (m a -> IO a) -> GenT m a -> IO a
+generate :: (m a -> a) -> GenT m a -> IO a
 generate runM (MkGenT g) = do
   r <- newQCGen
-  runM (g r 30)
+  return (runM (g r 30))
 
 getSize :: Monad m => GenT m Int
 getSize = sized pure
@@ -82,7 +82,7 @@ getSize = sized pure
 scale :: (Int -> Int) -> GenT m a -> GenT m a
 scale f g = sized (\n -> resize (f n) g)
 
--- sample' :: (m a -> IO a) -> GenT m a -> IO [a]
+-- sample' :: (m a -> a) -> GenT m a -> IO [a]
 -- sample' runM g =
 --   generate undefined (sequence [resize n g | n <- [0, 2 .. 20]])
 

@@ -1,15 +1,13 @@
 module BST where
 
-import Control.Monad.State (evalState)
-import Data.Default (Default (def))
+import Control.Monad.Reader (MonadReader (..))
 import qualified Data.Set as Set
 import GenT
-  ( generate,
-    infiniteListOf,
+  ( infiniteListOf,
     resize,
     sized,
   )
-import MCCGen (MCCContext, MCCGen, mccselect, reward, (<:>))
+import MCCGen (MCCGen, generate, mccselect, reward, (<:>))
 
 data BST
   = Node BST Int BST
@@ -27,32 +25,31 @@ isBST :: BST -> Bool
 isBST Leaf = True
 isBST (Node l x r) = all (< x) (toList l) && all (> x) (toList r) && isBST l && isBST r
 
-genTree :: MCCContext -> MCCGen BST
-genTree context = resize 4 $ sized (aux context)
+genTree :: MCCGen BST
+genTree = resize 4 $ sized aux
   where
-    aux :: MCCContext -> Int -> MCCGen BST
-    aux _ 0 = pure Leaf
-    aux ctx depth = do
-      i <- mccselect "NODE_VAL" ctx (pure <$> [0 .. 10])
-      let ctx' = ("VAL(" ++ show i ++ ")") <:> ctx
-      mccselect
-        "NODE_TYPE"
-        ctx'
-        [ pure Leaf,
-          Node
-            <$> aux ("LEFT" <:> ctx') (depth - 1)
-            <*> pure i
-            <*> aux ("RIGHT" <:> ctx') (depth - 1)
-        ]
+    aux :: Int -> MCCGen BST
+    aux 0 = pure Leaf
+    aux depth = do
+      i <- mccselect "NODE_VAL" (pure <$> [0 .. 10])
+      local (("VAL(" ++ show i ++ ")") <:>) $
+        mccselect
+          "NODE_TYPE"
+          [ pure Leaf,
+            Node
+              <$> local ("LEFT" <:>) (aux (depth - 1))
+              <*> pure i
+              <*> local ("RIGHT" <:>) (aux (depth - 1))
+          ]
 
 genTrees :: MCCGen [BST]
-genTrees = infiniteListOf (genTree [])
+genTrees = infiniteListOf genTree
 
 genBSTs :: MCCGen [BST]
 genBSTs = aux Set.empty
   where
     aux s = do
-      t <- genTree []
+      t <- genTree
       let bst = isBST t
           unique = not $ t `Set.member` s
       reward $ case (bst, unique) of
@@ -68,7 +65,7 @@ test total = do
   where
     aux n g = do
       putStr n
-      ts <- filter isBST <$> generate (pure . (`evalState` def)) (take total <$> g)
+      ts <- filter isBST <$> generate (take total <$> g)
       putStr $ " " ++ show (length ts) ++ " valid BSTs"
       putStr $ ", " ++ show (length . Set.fromList $ ts) ++ " unique valid BSTs"
       putStr $ ", " ++ show (maximum . map size $ ts) ++ " max size"
