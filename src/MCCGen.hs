@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -19,13 +20,19 @@ import Control.Lens
     (%=),
     (^.),
   )
-import Control.Monad.State (MonadState (..), gets)
+import Control.Monad.State (MonadState (..), State, gets)
+import qualified Control.Monad.State as State
 import Data.Default (Default (..))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
-import LGen (LGen (..))
-import MonadGen (MonadGen (choose), Select (..), SelectId, elements)
+import GenT
+  ( GenT (MkGenT),
+    choose,
+    elements,
+  )
+
+type SelectId = String
 
 type MCCContext = [String]
 
@@ -41,37 +48,35 @@ newtype MCCState = MCCState
   }
   deriving (Show, Eq)
 
+makeLenses ''MCCState
+makeLenses ''MCCLearner
+
 instance Default MCCLearner where
   def = MCCLearner [] Map.empty Map.empty
 
 instance Default MCCState where
   def = MCCState Map.empty
 
-makeLenses ''MCCState
-makeLenses ''MCCLearner
-
-newtype MCCGen a = MCCGen {unMCC :: LGen MCCState a}
-  deriving (Functor, Applicative, Monad, MonadGen)
+type MCCGen = GenT (State MCCState)
 
 instance MonadState MCCState MCCGen where
-  get = MCCGen get
-  put s = MCCGen (put s)
+  get = MkGenT (\_ _ -> State.get)
+  put s = MkGenT (\_ _ -> State.put s)
 
-instance Select MCCGen where
-  type Ctx MCCGen = MCCContext
-  select selId ctx gs = do
-    e <- choose (0 :: Int, 3)
-    let idxs = [0 .. length gs - 1]
-    c <-
-      if e == 0
-        then elements idxs
-        else do
-          qs <- gets (view (learners . at selId . non def . qTable))
-          let qGens = map (\i -> (qs ^. (at (ctx, i) . non 0), i)) idxs
-              maxq = maximum (map fst qGens)
-          elements . map snd . filter ((== maxq) . fst) $ qGens
-    learners . at selId . non def . episode %= (++ [(ctx, c, 0)])
-    gs !! c
+mccselect :: SelectId -> MCCContext -> [MCCGen a] -> MCCGen a
+mccselect selId ctx gs = do
+  e <- choose (0 :: Int, 3)
+  let idxs = [0 .. length gs - 1]
+  c <-
+    if e == 0
+      then elements idxs
+      else do
+        qs <- gets (view (learners . at selId . non def . qTable))
+        let qGens = map (\i -> (qs ^. (at (ctx, i) . non 0), i)) idxs
+            maxq = maximum (map fst qGens)
+        elements . map snd . filter ((== maxq) . fst) $ qGens
+  learners . at selId . non def . episode %= (++ [(ctx, c, 0)])
+  gs !! c
 
 (<:>) :: String -> MCCContext -> MCCContext
 (<:>) x = (x :) . take 3

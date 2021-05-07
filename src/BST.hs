@@ -1,8 +1,15 @@
 module BST where
 
+import Control.Monad.State (evalState)
+import Data.Default (Default (def))
 import qualified Data.Set as Set
-import MCCGen (MCCContext, MCCGen (..), reward, (<:>))
-import MonadGen (MonadGen (generate, resize, sized), Select (..), infiniteListOf)
+import GenT
+  ( generate,
+    infiniteListOf,
+    resize,
+    sized,
+  )
+import MCCGen (MCCContext, MCCGen, mccselect, reward, (<:>))
 
 data BST
   = Node BST Int BST
@@ -26,9 +33,9 @@ genTree context = resize 4 $ sized (aux context)
     aux :: MCCContext -> Int -> MCCGen BST
     aux _ 0 = pure Leaf
     aux ctx depth = do
-      i <- select "NODE_VAL" ctx (pure <$> [0 .. 10])
+      i <- mccselect "NODE_VAL" ctx (pure <$> [0 .. 10])
       let ctx' = ("VAL(" ++ show i ++ ")") <:> ctx
-      select
+      mccselect
         "NODE_TYPE"
         ctx'
         [ pure Leaf,
@@ -61,7 +68,7 @@ test total = do
   where
     aux n g = do
       putStr n
-      ts <- filter isBST <$> generate (take total <$> g)
+      ts <- filter isBST <$> generate (pure . (`evalState` def)) (take total <$> g)
       putStr $ " " ++ show (length ts) ++ " valid BSTs"
       putStr $ ", " ++ show (length . Set.fromList $ ts) ++ " unique valid BSTs"
       putStr $ ", " ++ show (maximum . map size $ ts) ++ " max size"

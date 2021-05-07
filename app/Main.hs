@@ -1,6 +1,6 @@
 module Main where
 
-import Lib
+import BST (test)
 
 main :: IO ()
-main = putStrLn "Hello, world!"
+main = test 100000
