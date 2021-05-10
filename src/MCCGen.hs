@@ -22,18 +22,19 @@ import Control.Lens
     (^.),
   )
 import Control.Monad.Reader (MonadReader (..))
-import Control.Monad.State (MonadState (..), State, evalState, gets, modify')
-import Control.Monad.Trans (MonadTrans (lift))
+import Control.Monad.State.Lazy (MonadState (..), StateT, evalStateT, gets, modify)
+import Control.Monad.Trans (MonadTrans (..))
 import Data.Default (Default (..))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Maybe as Maybe
-import GenT
-  ( GenT (MkGenT),
+import QuickCheck.GenT
+  ( GenT,
     choose,
     elements,
+    runGenT,
   )
-import qualified GenT
+import qualified Test.QuickCheck as QC
 
 type SelectId = String
 
@@ -60,22 +61,24 @@ instance Default MCCLearner where
 instance Default MCCState where
   def = MCCState Map.empty
 
-type MCCGen = GenT (State (MCCContext, MCCState))
+type MCCGen = GenT (StateT (MCCContext, MCCState) [])
 
 generate :: MCCGen a -> IO a
-generate = GenT.generate (`evalState` def)
+generate = ((head . (`evalStateT` def)) <$>) . QC.generate . runGenT
 
 instance MonadState MCCState MCCGen where
   get = lift (gets snd)
-  put s = lift . modify' $ second (const s)
+  put s = lift . modify $ second (const s)
 
 instance MonadReader MCCContext MCCGen where
   ask = lift (gets fst)
-  local f (MkGenT g) = MkGenT $ \s n -> do
-    ctx <- gets fst
-    modify' (first f)
-    x <- g s n
-    modify' (first $ const ctx)
+  local f g = do
+    ctx <- lift $ do
+      ctx <- gets fst
+      modify (first f)
+      pure ctx
+    x <- g
+    lift . modify $ first (const ctx)
     pure x
 
 mccselect :: SelectId -> [MCCGen a] -> MCCGen a

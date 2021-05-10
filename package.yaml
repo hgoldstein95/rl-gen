@@ -27,6 +27,8 @@ dependencies:
 - lens
 - deepseq
 - mtl
+- QuickCheck-GenT
+- QuickCheck
 
 ghc-options:
   - -Wall

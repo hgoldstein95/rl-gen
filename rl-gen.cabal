@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: bc3589746daef62ef248e47960b004b86fe62f264afd0835a9ecebf1a4402067
+-- hash: 69ffd7b981ec4ef35ecde75219cd0370b39528d139fdcac7e5f93b6e5a4b3287
 
 name:           rl-gen
 version:        0.1.0.0
@@ -28,7 +28,6 @@ source-repository head
 library
   exposed-modules:
       BST
-      GenT
       MCCGen
       MonadGen
   other-modules:
@@ -37,7 +36,9 @@ library
       src
   ghc-options: -Wall -Werror
   build-depends:
-      base >=4.7 && <5
+      QuickCheck
+    , QuickCheck-GenT
+    , base >=4.7 && <5
     , containers
     , data-default
     , deepseq
@@ -54,7 +55,9 @@ executable rl-gen-exe
       app
   ghc-options: -Wall -Werror -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      QuickCheck
+    , QuickCheck-GenT
+    , base >=4.7 && <5
     , containers
     , data-default
     , deepseq
@@ -73,7 +76,9 @@ test-suite rl-gen-test
       test
   ghc-options: -Wall -Werror -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      QuickCheck
+    , QuickCheck-GenT
+    , base >=4.7 && <5
     , containers
     , data-default
     , deepseq

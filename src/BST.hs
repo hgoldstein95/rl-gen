@@ -2,12 +2,12 @@ module BST where
 
 import Control.Monad.Reader (MonadReader (..))
 import qualified Data.Set as Set
-import GenT
+import MCCGen (MCCGen, generate, mccselect, reward, (<:>))
+import QuickCheck.GenT
   ( infiniteListOf,
     resize,
     sized,
   )
-import MCCGen (MCCGen, generate, mccselect, reward, (<:>))
 
 data BST
   = Node BST Int BST
@@ -56,11 +56,12 @@ genBSTs = aux Set.empty
         (True, True) -> 20
         (True, False) -> 0
         _ -> -1
-      (t :) <$> aux (Set.insert t s)
+      ts <- aux (Set.insert t s)
+      pure (t : ts)
 
 test :: Int -> IO ()
 test total = do
-  aux "RAND:" genTrees
+  -- aux "RAND:" genTrees
   aux "RL  :" genBSTs
   where
     aux n g = do
