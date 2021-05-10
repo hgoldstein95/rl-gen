@@ -3,4 +3,4 @@ module Main where
 import BST (test)
 
 main :: IO ()
-main = test 100000
+main = test 5

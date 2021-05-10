@@ -8,6 +8,7 @@
 
 module MCCGen where
 
+import Control.Arrow (first, second)
 import Control.Lens
   ( At (at),
     Field3 (_3),
@@ -20,10 +21,9 @@ import Control.Lens
     (%=),
     (^.),
   )
-import Control.Monad.Reader (MonadReader (..), ReaderT, runReaderT)
-import qualified Control.Monad.Reader as Reader
-import Control.Monad.State (MonadState (..), State, evalState, gets)
-import qualified Control.Monad.State as State
+import Control.Monad.Reader (MonadReader (..))
+import Control.Monad.State (MonadState (..), State, evalState, gets, modify')
+import Control.Monad.Trans (MonadTrans (lift))
 import Data.Default (Default (..))
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -60,18 +60,23 @@ instance Default MCCLearner where
 instance Default MCCState where
   def = MCCState Map.empty
 
-type MCCGen = GenT (ReaderT MCCContext (State MCCState))
+type MCCGen = GenT (State (MCCContext, MCCState))
 
 generate :: MCCGen a -> IO a
-generate = GenT.generate ((`evalState` def) . (`runReaderT` []))
+generate = GenT.generate (`evalState` def)
 
 instance MonadState MCCState MCCGen where
-  get = MkGenT (\_ _ -> State.get)
-  put s = MkGenT (\_ _ -> State.put s)
+  get = lift (gets snd)
+  put s = lift . modify' $ second (const s)
 
 instance MonadReader MCCContext MCCGen where
-  ask = MkGenT (\_ _ -> Reader.ask)
-  local f (MkGenT g) = MkGenT (\s n -> Reader.local f (g s n))
+  ask = lift (gets fst)
+  local f (MkGenT g) = MkGenT $ \s n -> do
+    ctx <- gets fst
+    modify' (first f)
+    x <- g s n
+    modify' (first $ const ctx)
+    pure x
 
 mccselect :: SelectId -> [MCCGen a] -> MCCGen a
 mccselect selId gs = do
