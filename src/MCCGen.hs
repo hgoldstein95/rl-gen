@@ -63,7 +63,7 @@ instance Default MCCState where
 
 type MCCGen = GenT (StateT (MCCContext, MCCState) [])
 
-generate :: MCCGen a -> IO a
+generate :: Default s => GenT (StateT s []) a -> IO a
 generate = ((head . (`evalStateT` def)) <$>) . QC.generate . runGenT
 
 instance MonadState MCCState MCCGen where

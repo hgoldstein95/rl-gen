@@ -1,13 +1,13 @@
 module BST where
 
+import Control.Monad (replicateM)
 import Control.Monad.Reader (MonadReader (..))
+import Control.Monad.State (StateT, evalStateT, get, modify)
+import Control.Monad.Trans (lift)
+import Data.Set (Set)
 import qualified Data.Set as Set
 import MCCGen (MCCGen, generate, mccselect, reward, (<:>))
-import QuickCheck.GenT
-  ( infiniteListOf,
-    resize,
-    sized,
-  )
+import QuickCheck.GenT (resize, sized)
 
 data BST
   = Node BST Int BST
@@ -42,31 +42,34 @@ genTree = resize 4 $ sized aux
               <*> local ("RIGHT" <:>) (aux (depth - 1))
           ]
 
-genTrees :: MCCGen [BST]
-genTrees = infiniteListOf genTree
+genBST :: StateT (Set BST) MCCGen BST
+genBST = do
+  t <- lift genTree
+  s <- get
+  let bst = isBST t
+      unique = not $ t `Set.member` s
+  lift $
+    reward $ case (bst, unique) of
+      (True, True) -> 20
+      (True, False) -> 0
+      _ -> -1
+  modify (Set.insert t)
+  pure t
 
-genBSTs :: MCCGen [BST]
-genBSTs = aux Set.empty
-  where
-    aux s = do
-      t <- genTree
-      let bst = isBST t
-          unique = not $ t `Set.member` s
-      reward $ case (bst, unique) of
-        (True, True) -> 20
-        (True, False) -> 0
-        _ -> -1
-      ts <- aux (Set.insert t s)
-      pure (t : ts)
+genTrees :: Int -> MCCGen [BST]
+genTrees n = replicateM n genTree
+
+genBSTs :: Int -> MCCGen [BST]
+genBSTs n = evalStateT (replicateM n genBST) Set.empty
 
 test :: Int -> IO ()
 test total = do
-  -- aux "RAND:" genTrees
-  aux "RL  :" genBSTs
+  aux "RAND:" (genTrees total)
+  aux "RL  :" (genBSTs total)
   where
     aux n g = do
       putStr n
-      ts <- filter isBST <$> generate (take total <$> g)
+      ts <- filter isBST <$> generate g
       putStr $ " " ++ show (length ts) ++ " valid BSTs"
       putStr $ ", " ++ show (length . Set.fromList $ ts) ++ " unique valid BSTs"
       putStr $ ", " ++ show (maximum . map size $ ts) ++ " max size"
