@@ -29,6 +29,7 @@ dependencies:
 - mtl
 - QuickCheck-GenT
 - QuickCheck
+- logict
 
 ghc-options:
   - -Wall
