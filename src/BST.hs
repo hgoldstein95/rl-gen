@@ -6,7 +6,7 @@ import Control.Monad.State (StateT, evalStateT, get, modify)
 import Control.Monad.Trans (lift)
 import Data.Set (Set)
 import qualified Data.Set as Set
-import MCCGen (MCCGen, generate, mccreward, mccselect, (<:>))
+import MCCGen (MCCGen, generate, mccreward, select, (<:>))
 import QuickCheck.GenT (resize, sized)
 
 data BST
@@ -31,9 +31,9 @@ genTree = resize 4 $ sized aux
     aux :: Int -> MCCGen BST
     aux 0 = pure Leaf
     aux depth = do
-      i <- mccselect "NODE_VAL" (pure <$> [0 .. 10])
+      i <- select "NODE_VAL" (pure <$> [0 .. 10])
       local (("VAL(" ++ show i ++ ")") <:>) $
-        mccselect
+        select
           "NODE_TYPE"
           [ pure Leaf,
             Node

@@ -13,22 +13,24 @@ import Control.Monad.State.Strict (put, runState)
 import Control.Monad.Trans (lift)
 import Data.Default (def)
 import qualified Data.Set as Set
-import MCCGen (MCCGen, mccreward, mccselect, (<:>))
+import MCCGen (MCCGen, mccreward, mccselect_, (<:>))
 import QuickCheck.GenT (MonadGen (..), runGenT)
 import Test.QuickCheck (Gen, generate, oneof)
 
 newtype Learner a = Learner {learnerFn :: Gen (a, Learner a)}
 
 class MonadGen g => MonadAutoGen g where
-  select :: String -> [g a] -> g a
+  select :: String -> [g a] -> (a -> g b) -> g b
   context :: String -> g a -> g a
 
 instance MonadAutoGen Gen where
-  select _ = oneof
+  select _ d f = oneof d >>= f
   context _ g = g
 
 instance MonadAutoGen MCCGen where
-  select = mccselect
+  select l d f = do
+    i <- mccselect_ l d
+    context ("VAL(" ++ show i ++ ")") $ f =<< d !! i
   context s = local (s <:>)
 
 -- GOAL: Keep this structure, but come up with a definition for g that has enough info for MCC
@@ -37,8 +39,7 @@ genTree = resize 4 $ sized aux
   where
     aux 0 = pure Leaf
     aux depth = do
-      x <- select "NODE_VAL" (pure <$> [0 .. 10])
-      context ("VAL(" ++ show x ++ ")") $
+      select "NODE_VAL" (pure <$> [0 .. 10]) $ \x ->
         select
           "NODE_TYPE"
           [ pure Leaf,
@@ -47,6 +48,7 @@ genTree = resize 4 $ sized aux
               <*> pure x
               <*> context "RIGHT" (aux (depth - 1))
           ]
+          pure
 
 learnGen :: Gen a -> Learner a
 learnGen g = Learner $ do

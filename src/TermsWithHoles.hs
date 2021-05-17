@@ -1,9 +1,11 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
 module TermsWithHoles where
 
-import Test.QuickCheck (Gen, elements, frequency, sized)
+import BCP_5_14 (MonadAutoGen (..))
+import QuickCheck.GenT (MonadGen (..))
 
 type Depth = Int
 
@@ -23,15 +25,16 @@ size Leaf = 0
 size (Node l _ r) = 1 + size l + size r
 size Hole = 0
 
-genTree :: Gen GBST
+genTree :: forall g. MonadAutoGen g => g GBST
 genTree = sized (aux Hole)
   where
+    aux :: GBST -> Int -> g GBST
     aux t n = do
       t' <- growTree t
       if t == t' then pure t' else aux t' (n `div` 2)
 
-growTree :: GBST -> Gen GBST
-growTree t = aux t
+growTree :: MonadAutoGen g => GBST -> g GBST
+growTree = aux
   where
     aux Leaf = pure Leaf
     aux (Node l x r) = do
@@ -40,7 +43,9 @@ growTree t = aux t
         then Node l x <$> aux r
         else pure $ Node l' x r
     aux Hole =
-      frequency
-        [ (size t, pure Leaf), -- distribution can depend on the bigger tree
-          (1, (\x -> Node Hole x Hole) <$> elements [1 .. 10])
+      select
+        "NODE_TYPE"
+        [ pure Leaf,
+          select "NODE_VAL" (pure <$> [1 .. 10]) $ \x -> pure $ Node Hole x Hole
         ]
+        pure

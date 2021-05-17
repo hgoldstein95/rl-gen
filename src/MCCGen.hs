@@ -81,8 +81,11 @@ instance MonadReader MCCContext MCCGen where
     lift . modify $ first (const ctx)
     pure x
 
-mccselect :: SelectId -> [MCCGen a] -> MCCGen a
-mccselect selId gs = do
+select :: SelectId -> [MCCGen a] -> MCCGen a
+select l d = (d !!) =<< mccselect_ l d
+
+mccselect_ :: SelectId -> [MCCGen a] -> MCCGen Int
+mccselect_ selId gs = do
   e <- choose (0 :: Int, 3)
   ctx <- ask
   let idxs = [0 .. length gs - 1]
@@ -95,7 +98,7 @@ mccselect selId gs = do
             maxq = maximum (map fst qGens)
         elements . map snd . filter ((== maxq) . fst) $ qGens
   learners . at selId . non def . episode %= (++ [(ctx, c, 0)])
-  gs !! c
+  pure c
 
 (<:>) :: String -> MCCContext -> MCCContext
 (<:>) x = (x :) . take 3
