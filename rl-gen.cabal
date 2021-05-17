@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 833c01901d15975a8ff2a0c719169e5097d6d652bdc9259b546834549e97e6d4
+-- hash: f9cf6b4bfef19a12cedc5e2c5641c86f0fb121f8dd0c4e2c9aadaae5b0f302c4
 
 name:           rl-gen
 version:        0.1.0.0
@@ -27,10 +27,12 @@ source-repository head
 
 library
   exposed-modules:
+      BCP_5_14
       BST
       LogicGen
       MCCGen
       MonadGen
+      Sandbox
   other-modules:
       Paths_rl_gen
   hs-source-dirs:
