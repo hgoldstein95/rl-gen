@@ -6,7 +6,7 @@ import Control.Monad.State (StateT, evalStateT, get, modify)
 import Control.Monad.Trans (lift)
 import Data.Set (Set)
 import qualified Data.Set as Set
-import MCCGen (MCCGen, generate, mccselect, reward, (<:>))
+import MCCGen (MCCGen, generate, mccreward, mccselect, (<:>))
 import QuickCheck.GenT (resize, sized)
 
 data BST
@@ -49,7 +49,7 @@ genBST = do
   let bst = isBST t
       unique = not $ t `Set.member` s
   lift $
-    reward $ case (bst, unique) of
+    mccreward $ case (bst, unique) of
       (True, True) -> 20
       (True, False) -> 0
       _ -> -1

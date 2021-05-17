@@ -22,11 +22,11 @@ import Control.Lens
     (^.),
   )
 import Control.Monad.Reader (MonadReader (..))
-import Control.Monad.State.Lazy (MonadState (..), StateT, evalStateT, gets, modify)
+import Control.Monad.State.Strict (MonadState (..), State, evalState, gets, modify)
 import Control.Monad.Trans (MonadTrans (..))
 import Data.Default (Default (..))
 import Data.Map (Map)
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import qualified Data.Maybe as Maybe
 import QuickCheck.GenT
   ( GenT,
@@ -61,10 +61,10 @@ instance Default MCCLearner where
 instance Default MCCState where
   def = MCCState Map.empty
 
-type MCCGen = GenT (StateT (MCCContext, MCCState) [])
+type MCCGen = GenT (State (MCCContext, MCCState))
 
-generate :: Default s => GenT (StateT s []) a -> IO a
-generate = ((head . (`evalStateT` def)) <$>) . QC.generate . runGenT
+generate :: Default s => GenT (State s) a -> IO a
+generate = ((`evalState` def) <$>) . QC.generate . runGenT
 
 instance MonadState MCCState MCCGen where
   get = lift (gets snd)
@@ -100,8 +100,8 @@ mccselect selId gs = do
 (<:>) :: String -> MCCContext -> MCCContext
 (<:>) x = (x :) . take 3
 
-reward :: Double -> MCCGen ()
-reward rv = do
+mccreward :: Double -> MCCGen ()
+mccreward rv = do
   selIds <- gets (Map.keys . view learners)
   mapM_ (`rewardOne` rv) selIds
 
