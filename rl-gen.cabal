@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: b626035992f773065de0e786c4f38c09b1a410be2e4f5c5dd1f60b1d78223eba
+-- hash: e35191a280d07d4f35e7bb9d993702fc276a7a075770488ffb648f8930b2ef47
 
 name:           rl-gen
 version:        0.1.0.0
@@ -45,6 +45,7 @@ library
     , base >=4.7 && <5
     , containers
     , data-default
+    , data-fix
     , deepseq
     , lens
     , logict
@@ -65,6 +66,7 @@ executable rl-gen-exe
     , base >=4.7 && <5
     , containers
     , data-default
+    , data-fix
     , deepseq
     , lens
     , logict
@@ -87,6 +89,7 @@ test-suite rl-gen-test
     , base >=4.7 && <5
     , containers
     , data-default
+    , data-fix
     , deepseq
     , lens
     , logict

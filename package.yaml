@@ -30,6 +30,7 @@ dependencies:
 - QuickCheck-GenT
 - QuickCheck
 - logict
+- data-fix
 
 ghc-options:
   - -Wall

@@ -1,51 +1,76 @@
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module TermsWithHoles where
 
 import BCP_5_14 (MonadAutoGen (..))
-import QuickCheck.GenT (MonadGen (..))
+import Test.QuickCheck (Gen)
 
 type Depth = Int
 
-data GBST
-  = Leaf
-  | Node GBST Int GBST
-  | Hole
-  deriving (Eq)
+data BSTF a
+  = Node' a Int a
+  deriving (Show, Functor, Eq)
 
-instance Show GBST where
-  show Leaf = "L"
-  show (Node l x r) = "(" ++ show l ++ " " ++ show x ++ " " ++ show r ++ ")"
-  show Hole = "_"
+data Free f a
+  = Pure a
+  | Free (f (Free f a))
 
-size :: GBST -> Int
-size Leaf = 0
-size (Node l _ r) = 1 + size l + size r
-size Hole = 0
+type BST = Free BSTF ()
 
-genTree :: forall g. MonadAutoGen g => g GBST
-genTree = sized (aux Hole)
+type HBST = Free BSTF Bool
+
+instance (Eq (f (Free f a)), Eq a) => Eq (Free f a) where
+  Pure x == Pure y = x == y
+  Free f == Free g = f == g
+  _ == _ = False
+
+instance (Show a, Show (f (Free f a))) => Show (Free f a) where
+  show (Pure x) = show x
+  show (Free f) = "(" ++ show f ++ ")"
+
+pattern Node :: Free BSTF a -> Int -> Free BSTF a -> Free BSTF a
+pattern Node l x r = Free (Node' l x r)
+
+pattern Leaf :: BST
+pattern Leaf = Pure ()
+
+pattern HLeaf :: HBST
+pattern HLeaf = Pure True
+
+pattern Hole :: HBST
+pattern Hole = Pure False
+
+freeze :: HBST -> BST
+freeze (Node l x r) = Node (freeze l) x (freeze r)
+freeze HLeaf = Leaf
+freeze Hole = error "cannot freeze term with hole"
+freeze _ = undefined
+
+genTree :: Gen BST
+genTree = freeze <$> aux Hole
   where
-    aux :: GBST -> Int -> g GBST
-    aux t n = do
+    aux t = do
       t' <- growTree t
-      if t == t' then pure t' else aux t' (n `div` 2)
+      if t == t' then pure t' else aux t'
 
-growTree :: MonadAutoGen g => GBST -> g GBST
-growTree = aux
-  where
-    aux Leaf = pure Leaf
-    aux (Node l x r) = do
-      l' <- aux l
-      if l' == l
-        then Node l x <$> aux r
-        else pure $ Node l' x r
-    aux Hole =
-      select
-        "NODE_TYPE"
-        [ pure Leaf,
-          select "NODE_VAL" (pure <$> [1 .. 10]) $ \x -> pure $ Node Hole x Hole
-        ]
-        pure
+growTree :: HBST -> Gen HBST
+growTree HLeaf = pure HLeaf
+growTree (Node l x r) = do
+  l' <- growTree l
+  r' <- if l' == l then growTree r else pure r
+  pure $ Node l' x r'
+growTree Hole =
+  select
+    "NODE_TYPE"
+    [ pure HLeaf,
+      select "NODE_VAL" (pure <$> [1 .. 100]) $ \x -> pure $ Node Hole x Hole
+    ]
+    pure
+growTree _ = undefined
