@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 5d403783135bd8c710ce3ff6a8f3953dff8caab3abcd8174e165c862d477d946
+-- hash: f22939b7ee63dd10844641d5f4dfdd7d1de9c62a5e95d460e81748d2b1e29f2d
 
 name:           rl-gen
 version:        0.1.0.0
@@ -34,6 +34,7 @@ library
       MCCGen
       MonadGen
       PathGenerators
+      Stephen
       TermsWithHoles
       Zippers
   other-modules:
