@@ -1,12 +1,14 @@
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 
 module ParserGen where
 
 import BST (BST (..))
 import Control.Monad (MonadPlus (mplus), liftM2, (>=>))
 import Control.Monad.Trans (lift)
+import Data.Maybe (fromJust)
 import QuickCheck.GenT (GenT, MonadGen (choose, liftGen), oneof, runGenT)
+import qualified Test.QuickCheck as QC
 import Prelude hiding (id, pure, (*>), (.), (<$>), (<*), (<*>))
 import qualified Prelude
 
@@ -22,7 +24,10 @@ instance Category Iso where
   id = Iso Just Just
   g . f = Iso (apply f >=> apply g) (unapply g >=> unapply f)
 
-newtype Printer a = Printer {runPrinter :: a -> Maybe [Int]}
+newtype Printer a = Printer {runPrinter :: a -> Maybe [(String, Int)]}
+
+ungenerate :: Printer a -> a -> [(String, Int)]
+ungenerate p = fromJust . runPrinter p
 
 data Iso a b = Iso (a -> Maybe b) (b -> Maybe a)
 
@@ -41,7 +46,7 @@ asum = foldr (<|>) empty
 
 class (IsoFunctor d, ProductFunctor d, Alternative d) => Syntax d where
   pure :: Eq a => a -> d a
-  token :: d Int
+  token :: (String, Int) -> d (String, Int)
 
 inverse :: Iso a b -> Iso b a
 inverse (Iso f g) = Iso g f
@@ -100,34 +105,37 @@ instance Alternative Printer where
 
 instance Syntax Printer where
   pure x = Printer (\y -> if x == y then Just [] else Nothing)
-  token = Printer (\t -> Just [t])
+  token _ = Printer (\t -> Just [t])
 
-instance IsoFunctor (GenT Maybe) where
-  iso <$> g = g >>= \x -> lift (apply iso x)
+newtype MGen a = MGen {unMGen :: GenT Maybe a}
 
-instance ProductFunctor (GenT Maybe) where
-  g1 <*> g2 = g1 >>= \x -> g2 >>= \y -> return (x, y)
+instance IsoFunctor MGen where
+  iso <$> MGen g = MGen $ g >>= \x -> lift (apply iso x)
 
-instance Alternative (GenT Maybe) where
-  g1 <|> g2 =
-    lift
-      =<< liftGen
-        ( oneof
-            [ do
-                runGenT g1 >>= \case
-                  Nothing -> runGenT g2
-                  Just x -> return (Just x),
-              do
-                runGenT g2 >>= \case
-                  Nothing -> runGenT g1
-                  Just x -> return (Just x)
-            ]
-        )
-  empty = lift Nothing
+instance ProductFunctor MGen where
+  MGen g1 <*> MGen g2 = MGen $ g1 >>= \x -> g2 >>= \y -> return (x, y)
 
-instance Syntax (GenT Maybe) where
-  pure = return
-  token = choose (0, 1000)
+instance Alternative MGen where
+  MGen g1 <|> MGen g2 =
+    MGen $
+      lift
+        =<< liftGen
+          ( oneof
+              [ do
+                  runGenT g1 >>= \case
+                    Nothing -> runGenT g2
+                    Just x -> return (Just x),
+                do
+                  runGenT g2 >>= \case
+                    Nothing -> runGenT g1
+                    Just x -> return (Just x)
+              ]
+          )
+  empty = MGen $ lift Nothing
+
+instance Syntax MGen where
+  pure = MGen . return
+  token (s, r) = MGen $ fmap (s,) (choose (0, r))
 
 leaf :: Iso () BST
 leaf =
@@ -147,15 +155,18 @@ node =
         Node l x r -> Just ((l, x), r)
     )
 
-bound :: Syntax d => Int -> d Int
-bound n = isoMod <$> token
-  where
-    isoMod = Iso (Just . (`mod` n)) Just
-
-select :: Syntax d => [d a] -> d a
-select = asum . zipWith (\n d -> (ignore n <$> token) *> d) [0 ..]
+select :: Syntax d => String -> [d a] -> d a
+select s ds = asum . zipWith (\n d -> (ignore (s, n) <$> token (s, length ds)) *> d) [0 ..] $ ds
 
 tree :: Syntax d => d BST
-tree = select [pure Leaf, node <$> ((tree <*> int) <*> tree)]
+tree =
+  select
+    "NODE"
+    [ pure Leaf,
+      node <$> ((tree <*> int) <*> tree)
+    ]
   where
-    int = select (fmap pure [1 .. 10])
+    int = select "VAL" (fmap pure [1 .. 10])
+
+generate :: MGen a -> IO a
+generate = fmap fromJust . QC.generate . runGenT . unMGen
