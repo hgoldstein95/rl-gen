@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: f22939b7ee63dd10844641d5f4dfdd7d1de9c62a5e95d460e81748d2b1e29f2d
+-- hash: 518f656156df4af24a3c7e2f9a81c74f53df205900a9fa256ac47ed17d072ec4
 
 name:           rl-gen
 version:        0.1.0.0
@@ -33,6 +33,7 @@ library
       LogicGen
       MCCGen
       MonadGen
+      ParserGen
       PathGenerators
       Stephen
       TermsWithHoles
@@ -53,6 +54,7 @@ library
     , lens
     , logict
     , mtl
+    , parsec
     , random
   default-language: Haskell2010
 
@@ -74,6 +76,7 @@ executable rl-gen-exe
     , lens
     , logict
     , mtl
+    , parsec
     , random
     , rl-gen
   default-language: Haskell2010
@@ -97,6 +100,7 @@ test-suite rl-gen-test
     , lens
     , logict
     , mtl
+    , parsec
     , random
     , rl-gen
   default-language: Haskell2010
