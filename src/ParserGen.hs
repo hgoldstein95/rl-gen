@@ -1,15 +1,21 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# OPTIONS_GHC -Wall #-}
 
 module ParserGen where
 
 import BST (BST (..))
 import Control.Monad (MonadPlus (mplus), liftM2, (>=>))
 import Control.Monad.Trans (lift)
+import Data.List (groupBy, sortBy)
+import Data.Map (Map, (!))
+import qualified Data.Map as Map
 import Data.Maybe (fromJust)
-import QuickCheck.GenT (GenT, MonadGen (choose, liftGen), oneof, runGenT)
+import Data.Ord (comparing)
+import QuickCheck.GenT (GenT, MonadGen (liftGen), frequency, runGenT, shuffle)
 import qualified Test.QuickCheck as QC
-import Prelude hiding (id, pure, (*>), (.), (<$>), (<*), (<*>))
+import Prelude hiding (id, pure, sum, (*>), (.), (<$>), (<*), (<*>))
 import qualified Prelude
 
 class Category cat where
@@ -24,29 +30,12 @@ instance Category Iso where
   id = Iso Just Just
   g . f = Iso (apply f >=> apply g) (unapply g >=> unapply f)
 
-newtype Printer a = Printer {runPrinter :: a -> Maybe [(String, Int)]}
+newtype Printer a = Printer {runPrinter :: a -> Maybe [(String, [Int])]}
 
-ungenerate :: Printer a -> a -> [(String, Int)]
-ungenerate p = fromJust . runPrinter p
+ungenerate :: Printer a -> a -> Map String [Int]
+ungenerate p = Map.unionsWith (zipWith (+)) . map (uncurry Map.singleton) . fromJust . runPrinter p
 
 data Iso a b = Iso (a -> Maybe b) (b -> Maybe a)
-
-class IsoFunctor f where
-  (<$>) :: Iso a b -> (f a -> f b)
-
-class ProductFunctor f where
-  (<*>) :: f a -> f b -> f (a, b)
-
-class Alternative f where
-  (<|>) :: f a -> f a -> f a
-  empty :: f a
-
-asum :: Alternative f => [f a] -> f a
-asum = foldr (<|>) empty
-
-class (IsoFunctor d, ProductFunctor d, Alternative d) => Syntax d where
-  pure :: Eq a => a -> d a
-  token :: (String, Int) -> d (String, Int)
 
 inverse :: Iso a b -> Iso b a
 inverse (Iso f g) = Iso g f
@@ -74,12 +63,6 @@ unit = Iso f g
     f a = Just (a, ())
     g (a, ()) = Just a
 
-(*>) :: Syntax d => d () -> d a -> d a
-p *> q = inverse unit . commute <$> (p <*> q)
-
-(<*) :: Syntax d => d a -> d () -> d a
-p <* q = inverse unit <$> (p <*> q)
-
 ignore :: a -> Iso a ()
 ignore x = Iso f g
   where
@@ -93,19 +76,33 @@ subset p = Iso f f
       | p x = Just x
       | otherwise = Nothing
 
+class IsoFunctor f where
+  (<$>) :: Iso a b -> (f a -> f b)
+
+class ProductFunctor f where
+  (<*>) :: f a -> f b -> f (a, b)
+
+class (IsoFunctor d, ProductFunctor d) => Syntax d where
+  pure :: Eq a => a -> d a
+  select :: String -> [d a] -> d a
+
+(*>) :: Syntax d => d () -> d a -> d a
+p *> q = inverse unit . commute <$> (p <*> q)
+
+(<*) :: Syntax d => d a -> d () -> d a
+p <* q = inverse unit <$> (p <*> q)
+
 instance IsoFunctor Printer where
   iso <$> Printer p = Printer (unapply iso >=> p)
 
 instance ProductFunctor Printer where
   Printer p <*> Printer q = Printer (\(x, y) -> liftM2 (++) (p x) (q y))
 
-instance Alternative Printer where
-  Printer p <|> Printer q = Printer (\x -> mplus (p x) (q x))
-  empty = Printer (const Nothing)
-
 instance Syntax Printer where
   pure x = Printer (\y -> if x == y then Just [] else Nothing)
-  token _ = Printer (\t -> Just [t])
+  select s ds = sum $ zipWith (\i d -> (ignore (s, [if x == i then 1 else 0 | x <- [0 .. length ds - 1]]) <$> Printer (\t -> Just [t])) *> d) [0 ..] ds
+    where
+      sum ps = Printer $ \x -> foldr (mplus . (($ x) . runPrinter)) Nothing ps
 
 newtype MGen a = MGen {unMGen :: GenT Maybe a}
 
@@ -115,27 +112,45 @@ instance IsoFunctor MGen where
 instance ProductFunctor MGen where
   MGen g1 <*> MGen g2 = MGen $ g1 >>= \x -> g2 >>= \y -> return (x, y)
 
-instance Alternative MGen where
-  MGen g1 <|> MGen g2 =
-    MGen $
-      lift
-        =<< liftGen
-          ( oneof
-              [ do
-                  runGenT g1 >>= \case
-                    Nothing -> runGenT g2
-                    Just x -> return (Just x),
-                do
-                  runGenT g2 >>= \case
-                    Nothing -> runGenT g1
-                    Just x -> return (Just x)
-              ]
-          )
-  empty = MGen $ lift Nothing
-
 instance Syntax MGen where
   pure = MGen . return
-  token (s, r) = MGen $ fmap (s,) (choose (0, r))
+  select _ ds = MGen $ lift =<< liftGen (aux =<< shuffle [0 .. length ds - 1])
+    where
+      aux (i : is) = do
+        runGenT (unMGen (ds !! i)) >>= \case
+          Nothing -> aux is
+          Just x -> return (Just x)
+      aux [] = return Nothing
+
+newtype OGen a = OGen {unOGen :: Map String [Int] -> GenT Maybe a}
+
+instance IsoFunctor OGen where
+  iso <$> OGen g = OGen $ g >=> \x -> lift (apply iso x)
+
+instance ProductFunctor OGen where
+  OGen g1 <*> OGen g2 = OGen $ \d -> g1 d >>= \x -> g2 d >>= \y -> return (x, y)
+
+-- -- | TODO: Should be able to intermix frequency levels
+-- freqShuffle :: MonadGen g => [(Int, a)] -> g [a]
+-- freqShuffle =
+--   fmap concat
+--     . mapM (shuffle . map snd)
+--     . groupBy (\x y -> fst x == fst y)
+--     . reverse
+--     . sortBy (comparing fst)
+--     . filter ((> 0) . fst)
+
+-- select s ds = OGen $ \m -> lift =<< liftGen (aux m =<< freqShuffle (zip (m ! s) [0 .. length ds - 1]))
+--   where
+--     aux m (i : is) = do
+--       runGenT (unOGen (ds !! i) m) >>= \case
+--         Nothing -> aux m is
+--         Just x -> return (Just x)
+--     aux _ [] = return Nothing
+
+instance Syntax OGen where
+  pure x = OGen $ \_ -> return x
+  select s ds = OGen $ \m -> frequency $ zip (m ! s) (fmap (($ m) . unOGen) ds)
 
 leaf :: Iso () BST
 leaf =
@@ -155,18 +170,20 @@ node =
         Node l x r -> Just ((l, x), r)
     )
 
-select :: Syntax d => String -> [d a] -> d a
-select s ds = asum . zipWith (\n d -> (ignore (s, n) <$> token (s, length ds)) *> d) [0 ..] $ ds
-
 tree :: Syntax d => d BST
-tree =
-  select
-    "NODE"
-    [ pure Leaf,
-      node <$> ((tree <*> int) <*> tree)
-    ]
+tree = aux (30 :: Int)
   where
-    int = select "VAL" (fmap pure [1 .. 10])
+    aux 0 = leaf <$> pure ()
+    aux n =
+      select
+        "NODE"
+        [ leaf <$> pure (),
+          node <$> ((aux (n `div` 2) <*> int) <*> aux (n `div` 2))
+        ]
+    int = select "INT" (fmap pure [0 .. 10])
 
 generate :: MGen a -> IO a
 generate = fmap fromJust . QC.generate . runGenT . unMGen
+
+generateFreq :: Map String [Int] -> OGen a -> IO a
+generateFreq m = fmap fromJust . QC.generate . runGenT . ($ m) . unOGen
