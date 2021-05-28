@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 518f656156df4af24a3c7e2f9a81c74f53df205900a9fa256ac47ed17d072ec4
+-- hash: 1eea01a30c02aca76645b15a2362dd5613828c5919b5a23258f5191d8285c857
 
 name:           rl-gen
 version:        0.1.0.0
@@ -29,6 +29,7 @@ library
   exposed-modules:
       BCP_5_14
       BST
+      ExprExample
       FreeGen
       LogicGen
       MCCGen
