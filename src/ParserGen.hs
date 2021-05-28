@@ -8,11 +8,9 @@ module ParserGen where
 import BST (BST (..))
 import Control.Monad (MonadPlus (mplus), liftM2, (>=>))
 import Control.Monad.Trans (lift)
-import Data.List (groupBy, sortBy)
 import Data.Map (Map, (!))
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
-import Data.Ord (comparing)
 import QuickCheck.GenT (GenT, MonadGen (liftGen), frequency, runGenT, shuffle)
 import qualified Test.QuickCheck as QC
 import Prelude hiding (id, pure, sum, (*>), (.), (<$>), (<*), (<*>))
@@ -31,9 +29,6 @@ instance Category Iso where
   g . f = Iso (apply f >=> apply g) (unapply g >=> unapply f)
 
 newtype Printer a = Printer {runPrinter :: a -> Maybe [(String, [Int])]}
-
-ungenerate :: Printer a -> a -> Map String [Int]
-ungenerate p = Map.unionsWith (zipWith (+)) . map (uncurry Map.singleton) . fromJust . runPrinter p
 
 data Iso a b = Iso (a -> Maybe b) (b -> Maybe a)
 
@@ -122,7 +117,9 @@ instance Syntax MGen where
           Just x -> return (Just x)
       aux [] = return Nothing
 
-newtype OGen a = OGen {unOGen :: Map String [Int] -> GenT Maybe a}
+type Dist = Map String [Int]
+
+newtype OGen a = OGen {unOGen :: Dist -> GenT Maybe a}
 
 instance IsoFunctor OGen where
   iso <$> OGen g = OGen $ g >=> \x -> lift (apply iso x)
@@ -182,8 +179,194 @@ tree = aux (30 :: Int)
         ]
     int = select "INT" (fmap pure [0 .. 10])
 
+ungenerate :: Printer a -> a -> Dist
+ungenerate p = Map.unionsWith (zipWith (+)) . map (uncurry Map.singleton) . fromJust . runPrinter p
+
 generate :: MGen a -> IO a
 generate = fmap fromJust . QC.generate . runGenT . unMGen
 
-generateFreq :: Map String [Int] -> OGen a -> IO a
+generateFreq :: Dist -> OGen a -> IO a
 generateFreq m = fmap fromJust . QC.generate . runGenT . ($ m) . unOGen
+
+invert :: Dist -> Dist
+invert =
+  Map.map
+    ( \is ->
+        if 0 `elem` is
+          then map (\i -> if i == 0 then 1 else 0) is
+          else
+            let m = maximum is
+             in map ((round :: Double -> Int) . (* fromIntegral m) . (1.0 /) . fromIntegral) is
+    )
+
+data Expr
+  = Term Term
+  | Plus Expr Term
+  | Minus Expr Term
+  deriving (Show)
+
+isoTerm :: Iso Term Expr
+isoTerm =
+  Iso
+    (Just . Term)
+    ( \case
+        Term t -> Just t
+        _ -> Nothing
+    )
+
+isoPlus :: Iso (Expr, Term) Expr
+isoPlus =
+  Iso
+    (Just . uncurry Plus)
+    ( \case
+        Plus e t -> Just (e, t)
+        _ -> Nothing
+    )
+
+isoMinus :: Iso (Expr, Term) Expr
+isoMinus =
+  Iso
+    (Just . uncurry Minus)
+    ( \case
+        Minus e t -> Just (e, t)
+        _ -> Nothing
+    )
+
+data Term = Factor Factor | Times Term Factor | Div Term Factor
+  deriving (Show)
+
+isoFactor :: Iso Factor Term
+isoFactor =
+  Iso
+    (Just . Factor)
+    ( \case
+        Factor t -> Just t
+        _ -> Nothing
+    )
+
+isoTimes :: Iso (Term, Factor) Term
+isoTimes =
+  Iso
+    (Just . uncurry Times)
+    ( \case
+        Times t f -> Just (t, f)
+        _ -> Nothing
+    )
+
+isoDiv :: Iso (Term, Factor) Term
+isoDiv =
+  Iso
+    (Just . uncurry Div)
+    ( \case
+        Div t f -> Just (t, f)
+        _ -> Nothing
+    )
+
+data Factor = Digits Digits | Pos Factor | Neg Factor | Parens Expr
+  deriving (Show)
+
+isoDigits :: Iso Digits Factor
+isoDigits =
+  Iso
+    (Just . Digits)
+    ( \case
+        Digits d -> Just d
+        _ -> Nothing
+    )
+
+isoPos :: Iso Factor Factor
+isoPos =
+  Iso
+    (Just . Pos)
+    ( \case
+        Pos f -> Just f
+        _ -> Nothing
+    )
+
+isoNeg :: Iso Factor Factor
+isoNeg =
+  Iso
+    (Just . Neg)
+    ( \case
+        Neg f -> Just f
+        _ -> Nothing
+    )
+
+isoParens :: Iso Expr Factor
+isoParens =
+  Iso
+    (Just . Parens)
+    ( \case
+        Parens e -> Just e
+        _ -> Nothing
+    )
+
+data Digits = Digit Int | More Int Digits
+  deriving (Show)
+
+isoDigit :: Iso Int Digits
+isoDigit =
+  Iso
+    (Just . Digit)
+    ( \case
+        Digit i -> Just i
+        _ -> Nothing
+    )
+
+isoMore :: Iso (Int, Digits) Digits
+isoMore =
+  Iso
+    (Just . uncurry More)
+    ( \case
+        More i d -> Just (i, d)
+        _ -> Nothing
+    )
+
+expr :: Syntax d => Int -> d Expr
+expr = \case
+  0 -> isoTerm <$> term 0
+  n ->
+    select
+      "EXPR"
+      [ isoTerm <$> term (n - 1),
+        isoPlus <$> (expr (n - 1) <*> term (n - 1)),
+        isoMinus <$> (expr (n - 1) <*> term (n - 1))
+      ]
+
+term :: Syntax d => Int -> d Term
+term = \case
+  0 -> isoFactor <$> factor 0
+  n ->
+    select
+      "TERM"
+      [ isoFactor <$> factor (n - 1),
+        isoTimes <$> (term (n - 1) <*> factor (n - 1)),
+        isoDiv <$> (term (n - 1) <*> factor (n - 1))
+      ]
+
+factor :: Syntax d => Int -> d Factor
+factor = \case
+  0 -> isoDigits <$> digits 0
+  n ->
+    select
+      "FACTOR"
+      [ isoDigits <$> digits (n - 1),
+        isoPos <$> factor (n - 1),
+        isoNeg <$> factor (n - 1),
+        isoParens <$> expr (n - 1)
+      ]
+
+digits :: Syntax d => Int -> d Digits
+digits = \case
+  0 -> isoDigit <$> int
+  n ->
+    select
+      "DIGITS"
+      [ isoDigit <$> int,
+        isoMore <$> (int <*> digits (n - 1))
+      ]
+  where
+    int = select "INT" (fmap pure [0 .. 9])
+
+example :: Expr
+example = Plus (Term (Factor (Digits (Digit 1)))) (Factor (Parens (Term (Times (Factor (Digits (Digit 2))) (Digits (Digit 3))))))
