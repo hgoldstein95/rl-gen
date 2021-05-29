@@ -3,6 +3,12 @@
 module ExprExample where
 
 import ParserGen
+  ( Category ((.)),
+    Iso (..),
+    IsoFunctor ((<$>)),
+    ProductFunctor ((<*>)),
+    Syntax (..),
+  )
 import Prelude hiding (div, id, pure, sum, (*>), (.), (<$>), (<*), (<*>))
 
 data Expr

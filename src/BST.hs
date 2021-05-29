@@ -25,6 +25,34 @@ isBST :: BST -> Bool
 isBST Leaf = True
 isBST (Node l x r) = all (< x) (toList l) && all (> x) (toList r) && isBST l && isBST r
 
+insert :: Int -> BST -> BST
+insert x Leaf = Node Leaf x Leaf
+insert x (Node l y r)
+  | x < y = Node (insert x l) y r
+  | x > y = Node l y (insert x r)
+  | otherwise = Node l y r
+
+delete :: Int -> BST -> BST
+delete _ Leaf = Leaf
+delete x (Node l y r)
+  | x < y = Node (delete x l) y r
+  | x > y = Node l y (delete x r)
+  | otherwise = case l of
+    Leaf -> r
+    Node {} -> let m = treeMax l in Node (delete m l) m r
+
+treeMax :: BST -> Int
+treeMax Leaf = error "empty tree"
+treeMax (Node _ x Leaf) = x
+treeMax (Node _ _ r) = treeMax r
+
+prune :: BST -> Maybe (Int, BST)
+prune Leaf = Nothing
+prune (Node l x Leaf) = Just (x, l)
+prune (Node l x r) = case prune r of
+  Just (v, r') -> Just (v, Node l x r')
+  _ -> error "pruning invariant failed"
+
 genTree :: MCCGen BST
 genTree = resize 4 $ sized aux
   where

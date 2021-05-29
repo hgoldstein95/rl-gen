@@ -5,7 +5,8 @@
 
 module ParserGen where
 
-import BST (BST (..))
+import BST (BST (..), prune)
+import qualified BST
 import Control.Monad (MonadPlus (mplus), liftM2, (>=>))
 import Control.Monad.Trans (lift)
 import Data.Map (Map, (!))
@@ -13,7 +14,7 @@ import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import QuickCheck.GenT (GenT, MonadGen (liftGen), frequency, runGenT, shuffle)
 import qualified Test.QuickCheck as QC
-import Prelude hiding (id, pure, sum, (*>), (.), (<$>), (<*), (<*>))
+import Prelude hiding (foldl, id, iterate, pure, sum, (*>), (.), (<$>), (<*), (<*>))
 import qualified Prelude
 
 class Category cat where
@@ -70,6 +71,35 @@ subset p = Iso f f
     f x
       | p x = Just x
       | otherwise = Nothing
+
+nil :: Iso () [a]
+nil = Iso (Just . const []) (\case [] -> Just (); _ -> Nothing)
+
+cons :: Iso (a, [a]) [a]
+cons = Iso (Just . uncurry (:)) (\case x : xs -> Just (x, xs); _ -> Nothing)
+
+foldl :: Iso (a, b) a -> Iso (a, [b]) a
+foldl i = inverse unit . (id `times` inverse nil) . iterate (step i)
+  where
+    step j = (j `times` id) . associate . (id `times` inverse cons)
+
+times :: Iso a b -> Iso c d -> Iso (a, c) (b, d)
+times i j = Iso f g
+  where
+    f (a, b) = liftM2 (,) (apply i a) (apply j b)
+    g (c, d) = liftM2 (,) (unapply i c) (unapply j d)
+
+driver :: (a -> Maybe a) -> a -> a
+driver step state =
+  case step state of
+    Just state' -> driver step state'
+    Nothing -> state
+
+iterate :: Iso a a -> Iso a a
+iterate step = Iso f g
+  where
+    f = Just . driver (apply step)
+    g = Just . driver (unapply step)
 
 class IsoFunctor f where
   (<$>) :: Iso a b -> (f a -> f b)
@@ -158,18 +188,27 @@ generate = fmap fromJust . QC.generate . runGenT . unMGen
 generateFreq :: Dist -> OGen a -> IO a
 generateFreq m = fmap fromJust . QC.generate . runGenT . ($ m) . unOGen
 
-invert :: Dist -> Dist
-invert =
-  Map.map
-    ( \is ->
-        if 0 `elem` is
-          then map (\i -> if i == 0 then 1 else 0) is
-          else
-            let m = maximum is
-             in map ((round :: Double -> Int) . (* fromIntegral m) . (1.0 /) . fromIntegral) is
-    )
+invertFreqs :: [Int] -> [Int]
+invertFreqs is =
+  if 0 `elem` is
+    then map (\i -> if i == 0 then 1 else 0) is
+    else
+      let m = maximum is
+       in map ((round :: Double -> Int) . (* fromIntegral m) . (1.0 /) . fromIntegral) is
+
+invertAll :: Dist -> Dist
+invertAll = Map.map invertFreqs
+
+invert :: String -> Dist -> Dist
+invert = Map.update (Just . invertFreqs)
+
+set :: String -> [Int] -> Dist -> Dist
+set = Map.insert
 
 -- Tree example
+int :: Syntax d => d Int
+int = select "INT" (fmap pure [0 .. 20])
+
 leaf :: Iso () BST
 leaf = Iso (\() -> Just Leaf) (\case Leaf -> Just (); _ -> Nothing)
 
@@ -179,14 +218,32 @@ node =
     (\((l, x), r) -> Just (Node l x r))
     (\case Node l x r -> Just ((l, x), r); _ -> Nothing)
 
+-- Works OK
 tree :: Syntax d => d BST
 tree = aux (30 :: Int)
   where
     aux 0 = leaf <$> pure ()
     aux n =
       select
-        "NODE"
+        "BST"
         [ leaf <$> pure (),
           node <$> ((aux (n `div` 2) <*> int) <*> aux (n `div` 2))
         ]
-    int = select "INT" (fmap pure [0 .. 10])
+
+-- Doesn't work very well
+ints :: Syntax d => d [Int]
+ints = aux (30 :: Int)
+  where
+    aux 0 = nil <$> pure ()
+    aux n = select "INTS" [nil <$> pure (), cons <$> (int <*> aux (n - 1))]
+
+insert :: Iso (Int, BST) BST
+insert = Iso (Just . uncurry BST.insert) prune
+
+bst :: Syntax d => d BST
+bst = foldl (insert . commute) <$> (pure Leaf <*> ints)
+
+interestingIdea :: IO BST
+interestingIdea =
+  let m = ungenerate bst (Node Leaf 2 (Node (Node Leaf 14 Leaf) 16 Leaf))
+   in generateFreq (set "LIST" [1, 10] $ invert "INT" m) bst
