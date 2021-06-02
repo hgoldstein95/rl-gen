@@ -7,9 +7,10 @@ module ParserGen where
 
 import BST (BST (..), prune)
 import qualified BST
+import Control.Arrow (Arrow (second))
 import Control.Monad (MonadPlus (mplus), liftM2, (>=>))
 import Control.Monad.Trans (lift)
-import Data.Map (Map, (!))
+import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import QuickCheck.GenT (GenT, MonadGen (liftGen), frequency, runGenT, shuffle)
@@ -101,6 +102,9 @@ iterate step = Iso f g
     f = Just . driver (apply step)
     g = Just . driver (unapply step)
 
+depend :: (b -> a) -> Iso (a, b) b
+depend f = Iso (\(_, b) -> Just b) (\b -> Just (f b, b))
+
 class IsoFunctor f where
   (<$>) :: Iso a b -> (f a -> f b)
 
@@ -110,6 +114,7 @@ class ProductFunctor f where
 class (IsoFunctor d, ProductFunctor d) => Syntax d where
   pure :: Eq a => a -> d a
   select :: String -> [d a] -> d a
+  bind :: d a -> (a -> d b) -> d (a, b)
 
 (*>) :: Syntax d => d () -> d a -> d a
 p *> q = inverse unit . commute <$> (p <*> q)
@@ -128,6 +133,7 @@ instance Syntax Printer where
   select s ds = sum $ zipWith (\i d -> (ignore (s, [if x == i then 1 else 0 | x <- [0 .. length ds - 1]]) <$> Printer (\t -> Just [t])) *> d) [0 ..] ds
     where
       sum ps = Printer $ \x -> foldr (mplus . (($ x) . runPrinter)) Nothing ps
+  bind (Printer p) f = Printer $ \(a, b) -> liftM2 (++) (p a) (runPrinter (f a) b)
 
 newtype MGen a = MGen {unMGen :: GenT Maybe a}
 
@@ -146,6 +152,10 @@ instance Syntax MGen where
           Nothing -> aux is
           Just x -> return (Just x)
       aux [] = return Nothing
+  bind (MGen ma) f = MGen $ do
+    a <- ma
+    b <- unMGen (f a)
+    return (a, b)
 
 type Dist = Map String [Int]
 
@@ -157,27 +167,29 @@ instance IsoFunctor OGen where
 instance ProductFunctor OGen where
   OGen g1 <*> OGen g2 = OGen $ \d -> g1 d >>= \x -> g2 d >>= \y -> return (x, y)
 
--- -- | TODO: Should be able to intermix frequency levels
--- freqShuffle :: MonadGen g => [(Int, a)] -> g [a]
--- freqShuffle =
---   fmap concat
---     . mapM (shuffle . map snd)
---     . groupBy (\x y -> fst x == fst y)
---     . reverse
---     . sortBy (comparing fst)
---     . filter ((> 0) . fst)
-
--- select s ds = OGen $ \m -> lift =<< liftGen (aux m =<< freqShuffle (zip (m ! s) [0 .. length ds - 1]))
---   where
---     aux m (i : is) = do
---       runGenT (unOGen (ds !! i) m) >>= \case
---         Nothing -> aux m is
---         Just x -> return (Just x)
---     aux _ [] = return Nothing
+freqShuffle :: MonadGen g => [(Int, a)] -> g [a]
+freqShuffle gs = do
+  idxs <- aux (zip (map fst gs) [0 ..])
+  return $ map (snd . (gs !!)) idxs
+  where
+    aux [] = return []
+    aux is = do
+      i <- frequency (map (second return) is)
+      fmap (i :) (aux (filter ((/= i) . snd) is))
 
 instance Syntax OGen where
   pure x = OGen $ \_ -> return x
-  select s ds = OGen $ \m -> frequency $ zip (m ! s) (fmap (($ m) . unOGen) ds)
+  select s ds = OGen $ \m -> lift =<< liftGen (aux m =<< freqShuffle (zip (Map.findWithDefault [1 ..] s m) [0 .. length ds - 1]))
+    where
+      aux m (i : is) = do
+        runGenT (unOGen (ds !! i) m) >>= \case
+          Nothing -> aux m is
+          Just x -> return (Just x)
+      aux _ [] = return Nothing
+  bind (OGen ma) f = OGen $ \m -> do
+    a <- ma m
+    b <- unOGen (f a) m
+    return (a, b)
 
 ungenerate :: Printer a -> a -> Dist
 ungenerate p = Map.unionsWith (zipWith (+)) . map (uncurry Map.singleton) . fromJust . runPrinter p
@@ -247,3 +259,6 @@ interestingIdea :: IO BST
 interestingIdea =
   let m = ungenerate bst (Node Leaf 2 (Node (Node Leaf 14 Leaf) 16 Leaf))
    in generateFreq (set "LIST" [1, 10] $ invert "INT" m) bst
+
+foo :: Syntax d => d (Int, Int)
+foo = bind int (\i -> if even i then select "A" [pure 1, pure 2] else select "B" [pure 3, pure 4])
