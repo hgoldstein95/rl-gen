@@ -13,7 +13,7 @@ import Control.Monad.Trans (lift)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
-import QuickCheck.GenT (GenT, MonadGen (liftGen), frequency, runGenT, shuffle)
+import QuickCheck.GenT (Gen, GenT, MonadGen (liftGen), elements, frequency, runGenT, shuffle)
 import qualified Test.QuickCheck as QC
 import Prelude hiding (foldl, id, iterate, pure, sum, (*>), (.), (<$>), (<*), (<*>))
 import qualified Prelude
@@ -102,8 +102,8 @@ iterate step = Iso f g
     f = Just . driver (apply step)
     g = Just . driver (unapply step)
 
-depend :: (b -> a) -> Iso (a, b) b
-depend f = Iso (\(_, b) -> Just b) (\b -> Just (f b, b))
+depend :: (b -> Maybe a) -> Iso (a, b) b
+depend f = Iso (\(_, b) -> Just b) (\b -> f b >>= \a -> Just (a, b))
 
 class IsoFunctor f where
   (<$>) :: Iso a b -> (f a -> f b)
@@ -115,6 +115,8 @@ class (IsoFunctor d, ProductFunctor d) => Syntax d where
   pure :: Eq a => a -> d a
   bind :: d a -> (a -> d b) -> d (a, b) -- Name in CT?
   select :: String -> [d a] -> d a
+  empty :: d a
+  uniform :: [a] -> d a
 
 (*>) :: Syntax d => d () -> d a -> d a
 p *> q = inverse unit . commute <$> (p <*> q)
@@ -142,6 +144,8 @@ instance Syntax Printer where
     where
       sum ps = Printer $ \x -> foldr (mplus . (($ x) . runPrinter)) Nothing ps
   bind (Printer p) f = Printer $ \(a, b) -> liftM2 (++) (p a) (runPrinter (f a) b)
+  empty = Printer (const Nothing)
+  uniform _ = Printer (\_ -> Just [])
 
 newtype MGen a = MGen {unMGen :: GenT Maybe a}
 
@@ -164,6 +168,8 @@ instance Syntax MGen where
     a <- ma
     b <- unMGen (f a)
     return (a, b)
+  empty = MGen $ lift Nothing
+  uniform = MGen . elements
 
 type Dist = Map String [Int]
 
@@ -187,7 +193,8 @@ freqShuffle gs = do
 
 instance Syntax OGen where
   pure x = OGen $ \_ -> return x
-  select s ds = OGen $ \m -> lift =<< liftGen (aux m =<< freqShuffle (zip (Map.findWithDefault [1 ..] s m) [0 .. length ds - 1]))
+  select s ds = OGen $ \m ->
+    lift =<< liftGen (aux m =<< freqShuffle (zip (Map.findWithDefault [1 ..] s m) [0 .. length ds - 1]))
     where
       aux m (i : is) = do
         runGenT (unOGen (ds !! i) m) >>= \case
@@ -198,12 +205,17 @@ instance Syntax OGen where
     a <- ma m
     b <- unOGen (f a) m
     return (a, b)
+  empty = OGen $ \_ -> lift Nothing
+  uniform xs = OGen $ \_ -> elements xs
 
 ungenerate :: Printer a -> a -> Dist
 ungenerate p = Map.unionsWith (zipWith (+)) . map (uncurry Map.singleton) . fromJust . runPrinter p
 
 generate :: MGen a -> IO a
 generate = fmap fromJust . QC.generate . runGenT . unMGen
+
+generate_ :: MGen a -> Gen a
+generate_ = fmap fromJust . runGenT . unMGen
 
 generateFreq :: Dist -> OGen a -> IO a
 generateFreq m = fmap fromJust . QC.generate . runGenT . ($ m) . unOGen
