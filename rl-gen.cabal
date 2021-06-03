@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 1eea01a30c02aca76645b15a2362dd5613828c5919b5a23258f5191d8285c857
+-- hash: e65e6fffe9f5902fdc62f8374f1d0461f0871df6d43a8ccf8890805075704b6b
 
 name:           rl-gen
 version:        0.1.0.0
@@ -37,6 +37,7 @@ library
       ParserGen
       PathGenerators
       Stephen
+      STLCExample
       TermsWithHoles
       Zippers
   other-modules:

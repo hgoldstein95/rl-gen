@@ -32,7 +32,7 @@ instance Category Iso where
 
 newtype Printer a = Printer {runPrinter :: a -> Maybe [(String, [Int])]}
 
-data Iso a b = Iso (a -> Maybe b) (b -> Maybe a)
+data Iso a b = Iso (a -> Maybe b) (b -> Maybe a) -- Can this be total?
 
 inverse :: Iso a b -> Iso b a
 inverse (Iso f g) = Iso g f
@@ -60,10 +60,10 @@ unit = Iso f g
     f a = Just (a, ())
     g (a, ()) = Just a
 
-ignore :: a -> Iso a ()
+ignore :: Eq a => a -> Iso a ()
 ignore x = Iso f g
   where
-    f _ = Just ()
+    f y = if x == y then Just () else Nothing
     g () = Just x
 
 subset :: (a -> Bool) -> Iso a a
@@ -113,8 +113,8 @@ class ProductFunctor f where
 
 class (IsoFunctor d, ProductFunctor d) => Syntax d where
   pure :: Eq a => a -> d a
+  bind :: d a -> (a -> d b) -> d (a, b) -- Name in CT?
   select :: String -> [d a] -> d a
-  bind :: d a -> (a -> d b) -> d (a, b)
 
 (*>) :: Syntax d => d () -> d a -> d a
 p *> q = inverse unit . commute <$> (p <*> q)
@@ -128,9 +128,17 @@ instance IsoFunctor Printer where
 instance ProductFunctor Printer where
   Printer p <*> Printer q = Printer (\(x, y) -> liftM2 (++) (p x) (q y))
 
+emit :: (String, [Int]) -> Printer ()
+emit p = ignore p <$> Printer (\t -> Just [t])
+
 instance Syntax Printer where
   pure x = Printer (\y -> if x == y then Just [] else Nothing)
-  select s ds = sum $ zipWith (\i d -> (ignore (s, [if x == i then 1 else 0 | x <- [0 .. length ds - 1]]) <$> Printer (\t -> Just [t])) *> d) [0 ..] ds
+  select s ds =
+    sum $
+      zipWith
+        (\i d -> emit (s, [if x == i then 1 else 0 | x <- [0 .. length ds - 1]]) *> d)
+        [0 ..]
+        ds
     where
       sum ps = Printer $ \x -> foldr (mplus . (($ x) . runPrinter)) Nothing ps
   bind (Printer p) f = Printer $ \(a, b) -> liftM2 (++) (p a) (runPrinter (f a) b)
