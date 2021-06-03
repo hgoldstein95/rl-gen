@@ -169,7 +169,7 @@ instance Syntax MGen where
     b <- unMGen (f a)
     return (a, b)
   empty = MGen $ lift Nothing
-  uniform = MGen . elements
+  uniform xs = MGen $ if null xs then lift Nothing else elements xs
 
 type Dist = Map String [Int]
 
@@ -206,7 +206,7 @@ instance Syntax OGen where
     b <- unOGen (f a) m
     return (a, b)
   empty = OGen $ \_ -> lift Nothing
-  uniform xs = OGen $ \_ -> elements xs
+  uniform xs = OGen $ \_ -> if null xs then lift Nothing else elements xs
 
 ungenerate :: Printer a -> a -> Dist
 ungenerate p = Map.unionsWith (zipWith (+)) . map (uncurry Map.singleton) . fromJust . runPrinter p
