@@ -20,8 +20,8 @@ import Prelude hiding (id, pure, sum, (*>), (.), (<$>), (<*), (<*>))
 data Ty = TInt | Ty :->: Ty
   deriving (Show, Eq)
 
-funty :: Iso (Ty, Ty) Ty
-funty =
+funTy :: Iso (Ty, Ty) Ty
+funTy =
   Iso
     (Just . uncurry (:->:))
     ( \case
@@ -93,7 +93,7 @@ genType :: Syntax d => d Ty
 genType = aux (10 :: Int)
   where
     aux 0 = pure TInt
-    aux n = select "TYPE" [pure TInt, funty <$> (aux (n `div` 2) <*> aux (n `div` 2))]
+    aux n = select "TYPE" [pure TInt, funTy <$> (aux (n `div` 2) <*> aux (n `div` 2))]
 
 genExprOf :: Syntax d => Ty -> d Expr
 genExprOf ty = aux ty [] (30 :: Int)
