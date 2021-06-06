@@ -39,7 +39,7 @@ class (Category c, Category d) => Functor c d f where
 (<$>) :: (Category c, Functor c (->) f) => c a b -> f a -> f b
 (<$>) = fmap
 
-class (Functor (<~>) (->) m) => IsoMonad m where
+class Functor (<~>) (->) m => IsoMonad m where
   pure :: Eq a => a -> m a
   bind :: m a -> (a -> m b) -> (b ~> a) -> m b
 
