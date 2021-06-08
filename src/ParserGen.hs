@@ -219,7 +219,9 @@ generate_ :: MGen a -> Gen a
 generate_ = fmap fromJust . runGenT . unMGen
 
 generateFreq :: Dist -> OGen a -> IO a
-generateFreq m = fmap fromJust . QC.generate . runGenT . ($ m) . unOGen
+generateFreq m = fmap fromJust . QC.generate . runGenT . ($ normalizeFreqs m) . unOGen
+  where
+    normalizeFreqs = Map.map (map (\i -> if i > 0 then i * 100 else 1)) -- Is this right?
 
 invertFreqs :: [Int] -> [Int]
 invertFreqs is =
