@@ -18,6 +18,7 @@ module SystemF
     size,
     wellTyped,
     genExpr,
+    test,
   )
 where
 
@@ -31,10 +32,14 @@ import ParserGen
   ( Category ((.)),
     Iso (..),
     IsoFunctor ((<$>)),
+    MGen (unMGen),
     ProductFunctor ((<*>)),
     Syntax (bind, pure, select, uniform),
     depend,
+    generate_,
   )
+import QuickCheck.GenT (runGenT)
+import Test.QuickCheck (Property, forAll, quickCheck, (==>))
 import Text.Printf
   ( FieldFormat (fmtChar, fmtPrecision),
     PrintfArg (formatArg),
@@ -380,7 +385,7 @@ tapp =
 genType :: Syntax d => Int -> d Type
 genType freeTypeVar = arb freeTypeVar (10 :: Int) -- TODO Size
   where
-    arb ftv 0 = uniform $ Base : fmap TVar [0 .. ftv -1]
+    arb ftv 0 = uniform $ pure Base : fmap (pure . TVar) [0 .. ftv -1]
     arb ftv n =
       select
         "TYPE"
@@ -389,42 +394,44 @@ genType freeTypeVar = arb freeTypeVar (10 :: Int) -- TODO Size
           forall <$> arb (ftv + 1) (n -1)
         ]
 
-genExpr :: forall d. (Syntax d) => d Expr
-genExpr = let ?mutant = NoMutant in depend typeOf <$> bind (genType 0) (\t -> arb 0 [] t (30 :: Int)) -- TODO Size
+genExpr :: Syntax d => d Expr
+genExpr = depend typeOf <$> bind (genType 0) genExprOf
+
+genExprOf :: forall d. Syntax d => Type -> d Expr
+genExprOf ty = let ?mutant = NoMutant in arb 0 [] ty (10 :: Int) -- TODO Size
   where
     arb ftv c t 0 =
-      select
-        "SIZE_ZERO"
-        $ [pure Con | t == Base]
+      uniform $
+        [pure Con | t == Base]
           ++ [pure (Var i) | (i, t') <- zip [0 ..] c, t == t']
-          ++ [lam <$> (pure t1 <*> arb ftv (t1 : c) t2 0) | (t1 :-> t2) <- [t]]
-          ++ [tlam <$> arb (ftv + 1) (map (let ?mutant = NoMutant in liftType 0) c) t1 0 | (ForAll t1) <- [t]] -- MUTANT?
+          ++ [lam <$> (pure t1 <*> arb ftv (t1 : c) t2 0) | t1 :-> t2 <- [t]]
+          ++ [tlam <$> arb (ftv + 1) (map (let ?mutant = NoMutant in liftType 0) c) t1 0 | ForAll t1 <- [t]]
     arb ftv c t n =
-      select "SIZE_NONZERO" $
-        [arb ftv c t 0]
-          ++ [lam <$> (pure t1 <*> arb ftv (t1 : c) t2 (n -1)) | (t1 :-> t2) <- [t]]
-          ++ [tlam <$> arb (ftv + 1) (map (let ?mutant = NoMutant in liftType 0) c) t1 (n -1) | (ForAll t1) <- [t]]
-          ++ [ depend (unGenApp ftv c)
-                 <$> bind
-                   (uniform (nub $ michal c t))
-                   (genApp ftv c t n)
-             ]
-          ++ [ depend (unGenApp ftv c)
-                 <$> bind
-                   (genType ftv)
-                   (genApp ftv c t n)
-             ]
-          ++ [ depend
-                 ( \case
-                     TApp e t' -> fmap (,t') (typeOf' ftv c e)
-                     _ -> Nothing
-                 )
-                 <$> bind
-                   (genT1T2 t)
-                   (\(t1, t2) -> tapp <$> (arb ftv c t1 (n - 1) <*> pure t2))
-             ]
-    genApp ftv c t n t2 = app <$> (arb ftv c (t2 :-> t) (n `div` 2) <*> arb ftv c t2 (n `div` 2))
+      select
+        "CONSTRUCTOR"
+        [ arb ftv c t 0,
+          uniform $
+            [lam <$> (pure t1 <*> arb ftv (t1 : c) t2 (n - 1)) | t1 :-> t2 <- [t]]
+              ++ [tlam <$> arb (ftv + 1) (map (let ?mutant = NoMutant in liftType 0) c) t1 (n - 1) | ForAll t1 <- [t]],
+          depend (unGenApp ftv c)
+            <$> bind
+              (uniform (map pure . nub $ michal c t))
+              (genApp ftv c t n),
+          depend (unGenApp ftv c)
+            <$> bind
+              (genType ftv)
+              (genApp ftv c t n),
+          depend
+            ( \case
+                TApp e t' -> fmap (,t') (typeOf' ftv c e)
+                _ -> Nothing
+            )
+            <$> bind
+              (genT1T2 t)
+              (\(t1, t2) -> tapp <$> (arb ftv c t1 (n - 1) <*> pure t2))
+        ]
 
+    genApp ftv c t n t2 = app <$> (arb ftv c (t2 :-> t) (n `div` 2) <*> arb ftv c t2 (n `div` 2))
     unGenApp ftv c = \case
       _ :@: e2 -> typeOf' ftv c e2
       _ -> Nothing
@@ -452,20 +459,24 @@ isClosed = isClosed' 0
 -- Randomly fetch a subterm of a type
 fetchSubType :: Syntax d => Type -> d Type
 fetchSubType t =
-  select "FETCH_SUB" $
-    [pure t | isClosed t]
-      ++ [fetchSubType t1 | (t1 :-> _) <- [t]]
-      ++ [fetchSubType t2 | (_ :-> t2) <- [t]]
-      ++ [fetchSubType t' | (ForAll t') <- [t]]
+  select
+    "FETCH_SUB"
+    [ uniform [pure t | isClosed t],
+      uniform [fetchSubType t1 | t1 :-> _ <- [t]],
+      uniform [fetchSubType t2 | _ :-> t2 <- [t]],
+      uniform [fetchSubType t' | ForAll t' <- [t]]
+    ]
 
 -- "Replace (some occurrences of) closed type s in type t by (TVar n)"
 replaceSubType :: Syntax d => Int -> Type -> Type -> d Type
 replaceSubType n s t =
-  select "REPLACE_SUB" $
-    [pure t]
-      ++ [pure (TVar n) | s == t]
-      ++ [do arrow <$> (replaceSubType n s t1 <*> replaceSubType n s t2) | (t1 :-> t2) <- [t]]
-      ++ [do forall <$> replaceSubType (n + 1) s t' | (ForAll t') <- [t], t' == s]
+  select
+    "REPLACE_SUB"
+    [ pure t,
+      uniform [pure (TVar n) | s == t],
+      uniform [do arrow <$> (replaceSubType n s t1 <*> replaceSubType n s t2) | t1 :-> t2 <- [t]],
+      uniform [do forall <$> replaceSubType (n + 1) s t' | ForAll t' <- [t], t' == s]
+    ]
 
 -- Generate t1 t2 such that t1{0:=t2} = t
 genT1T2 :: Syntax d => Type -> d (Type, Type)
@@ -473,3 +484,17 @@ genT1T2 ty =
   let t' = let ?mutant = NoMutant in liftType 0 ty
    in depend (Just . snd)
         <$> bind (fetchSubType t') (\t2 -> (forall <$> replaceSubType 0 t2 t') <*> pure t2)
+
+prop_genExprOfOK :: Property
+prop_genExprOfOK =
+  forAll (generate_ (genType 0)) $ \t ->
+    forAll (runGenT . unMGen $ genExprOf t) $ \e ->
+      isJust e ==> Just t == (typeOf =<< e)
+
+prop_genExprOK :: Property
+prop_genExprOK = forAll ((runGenT . unMGen) genExpr) $ \e -> isJust e ==> isJust (typeOf =<< e)
+
+test :: IO ()
+test = do
+  quickCheck prop_genExprOfOK
+  quickCheck prop_genExprOK

@@ -100,7 +100,7 @@ genExprOf ty = aux ty [] (30 :: Int)
   where
     aux t ctx n = select "EXPR" [genForType t ctx n, genApp t ctx n, varsOfType t ctx]
 
-    varsOfType t ctx = uniform [Var x | x <- map fst $ filter ((== t) . snd) $ zip [0 ..] ctx]
+    varsOfType t ctx = uniform [pure (Var x) | x <- map fst $ filter ((== t) . snd) $ zip [0 ..] ctx]
 
     cutType (_ :@: e) = typeOf e
     cutType _ = Nothing

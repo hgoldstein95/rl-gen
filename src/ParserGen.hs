@@ -13,7 +13,7 @@ import Control.Monad.Trans (lift)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
-import QuickCheck.GenT (Gen, GenT, MonadGen (liftGen), elements, frequency, runGenT, shuffle)
+import QuickCheck.GenT (Gen, GenT, MonadGen (liftGen), frequency, runGenT, shuffle)
 import qualified Test.QuickCheck as QC
 import Prelude hiding (foldl, id, iterate, pure, sum, (*>), (.), (<$>), (<*), (<*>))
 import qualified Prelude
@@ -116,7 +116,7 @@ class (IsoFunctor d, ProductFunctor d) => Syntax d where
   bind :: d a -> (a -> d b) -> d (a, b) -- Name in CT?
   select :: String -> [d a] -> d a
   empty :: d a
-  uniform :: [a] -> d a
+  uniform :: [d a] -> d a
 
 (*>) :: Syntax d => d () -> d a -> d a
 p *> q = inverse unit . commute <$> (p <*> q)
@@ -133,6 +133,9 @@ instance ProductFunctor Printer where
 emit :: (String, [Int]) -> Printer ()
 emit p = ignore p <$> Printer (\t -> Just [t])
 
+sum :: Foldable t => t (Printer a) -> Printer a
+sum ps = Printer $ \x -> foldr (mplus . (($ x) . runPrinter)) Nothing ps
+
 instance Syntax Printer where
   pure x = Printer (\y -> if x == y then Just [] else Nothing)
   select s ds =
@@ -141,11 +144,9 @@ instance Syntax Printer where
         (\i d -> emit (s, [if x == i then 1 else 0 | x <- [0 .. length ds - 1]]) *> d)
         [0 ..]
         ds
-    where
-      sum ps = Printer $ \x -> foldr (mplus . (($ x) . runPrinter)) Nothing ps
   bind (Printer p) f = Printer $ \(a, b) -> liftM2 (++) (p a) (runPrinter (f a) b)
   empty = Printer (const Nothing)
-  uniform _ = Printer (\_ -> Just [])
+  uniform ds = sum ds
 
 newtype MGen a = MGen {unMGen :: GenT Maybe a}
 
@@ -169,7 +170,7 @@ instance Syntax MGen where
     b <- unMGen (f a)
     return (a, b)
   empty = MGen $ lift Nothing
-  uniform xs = MGen $ if null xs then lift Nothing else elements xs
+  uniform = select ""
 
 type Dist = Map String [Int]
 
@@ -206,7 +207,7 @@ instance Syntax OGen where
     b <- unOGen (f a) m
     return (a, b)
   empty = OGen $ \_ -> lift Nothing
-  uniform xs = OGen $ \_ -> if null xs then lift Nothing else elements xs
+  uniform = select ""
 
 ungenerate :: Printer a -> a -> Dist
 ungenerate p = Map.unionsWith (zipWith (+)) . map (uncurry Map.singleton) . fromJust . runPrinter p
