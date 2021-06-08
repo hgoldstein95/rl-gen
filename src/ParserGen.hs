@@ -182,39 +182,26 @@ instance IsoFunctor OGen where
 instance ProductFunctor OGen where
   OGen g1 <*> OGen g2 = OGen $ \d -> g1 d >>= \x -> g2 d >>= \y -> return (x, y)
 
-freqShuffle :: MonadGen g => [(Int, a)] -> g (Maybe [a])
-freqShuffle gs =
-  aux (zip (map fst gs) [0 ..]) >>= \case
-    Nothing -> return Nothing
-    Just idxs -> return . Just $ map (snd . (gs !!)) idxs
+freqShuffle :: MonadGen g => [(Int, a)] -> g [a]
+freqShuffle gs = do
+  idxs <- aux (zip (map fst gs) [0 ..])
+  return $ map (snd . (gs !!)) idxs
   where
-    aux [] = return (Just [])
-    aux is =
-      if not . any ((> 0) . fst) $ is
-        then return Nothing
-        else do
-          i <- frequency (map (second return) is)
-          aux (filter ((/= i) . snd) is) >>= \case
-            Nothing -> return Nothing
-            Just is' -> return $ Just (i : is')
+    aux [] = return []
+    aux is = do
+      i <- frequency (map (second return) is)
+      fmap (i :) (aux (filter ((/= i) . snd) is))
 
 instance Syntax OGen where
   pure x = OGen $ \_ -> return x
-
   select s ds = OGen $ \m ->
-    lift
-      =<< liftGen
-        ( freqShuffle (zip (Map.findWithDefault [1 ..] s m) [0 .. length ds - 1]) >>= \case
-            Nothing -> return Nothing
-            Just is -> aux m is
-        )
+    lift =<< liftGen (aux m =<< freqShuffle (zip (Map.findWithDefault [1 ..] s m) [0 .. length ds - 1]))
     where
       aux m (i : is) = do
         runGenT (unOGen (ds !! i) m) >>= \case
           Nothing -> aux m is
           Just x -> return (Just x)
       aux _ [] = return Nothing
-
   bind (OGen ma) f = OGen $ \m -> do
     a <- ma m
     b <- unOGen (f a) m
