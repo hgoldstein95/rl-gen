@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 88f9805b1c2e357a6c91eb30d2765fe3f785492385b7e459074a321b910d230a
+-- hash: c8ccf7194edfa11e1d8a36cf112aba189453f546755cf600f63bb67b5d6b3568
 
 name:           rl-gen
 version:        0.1.0.0
@@ -37,8 +37,10 @@ library
       MonadGen
       ParserGen
       PathGenerators
+      QuickCheckEnum
       Stephen
       STLCExample
+      SystemF
       TermsWithHoles
       Zippers
   other-modules:
@@ -47,7 +49,8 @@ library
       src
   ghc-options: -Wall -Werror
   build-depends:
-      QuickCheck
+      MonadRandom
+    , QuickCheck
     , QuickCheck-GenT
     , base >=4.7 && <5
     , containers
@@ -69,7 +72,8 @@ executable rl-gen-exe
       app
   ghc-options: -Wall -Werror -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      QuickCheck
+      MonadRandom
+    , QuickCheck
     , QuickCheck-GenT
     , base >=4.7 && <5
     , containers
@@ -93,7 +97,8 @@ test-suite rl-gen-test
       test
   ghc-options: -Wall -Werror -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      QuickCheck
+      MonadRandom
+    , QuickCheck
     , QuickCheck-GenT
     , base >=4.7 && <5
     , containers

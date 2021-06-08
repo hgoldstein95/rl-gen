@@ -32,6 +32,7 @@ dependencies:
 - logict
 - data-fix
 - parsec
+- MonadRandom
 
 ghc-options:
   - -Wall
