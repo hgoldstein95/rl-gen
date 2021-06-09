@@ -6,6 +6,7 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-missing-methods -Wno-partial-type-signatures #-}
 
 module SystemF
@@ -34,7 +35,7 @@ import ParserGen
     IsoFunctor ((<$>)),
     MGen (unMGen),
     ProductFunctor ((<*>)),
-    Syntax (bind, pure, select, uniform),
+    Syntax (..),
     depend,
     generate_,
   )
@@ -383,58 +384,59 @@ tapp =
     )
 
 genType :: Syntax d => Int -> d Type
-genType freeTypeVar = arb freeTypeVar (10 :: Int) -- TODO Size
+genType freeTypeVar = arb freeTypeVar (10 :: Int)
   where
-    arb ftv 0 = uniform $ pure Base : fmap (pure . TVar) [0 .. ftv -1]
+    arb ftv n | n <= 0 = uniform $ pure Base : fmap (pure . TVar) [0 .. ftv -1]
     arb ftv n =
       select
         "TYPE"
         [ arb ftv 0,
           arrow <$> (arb ftv (n `div` 6) <*> arb ftv (n `div` 4)),
-          forall <$> arb (ftv + 1) (n -1)
+          forall <$> arb (ftv + 1) (n - 1)
         ]
 
 genExpr :: Syntax d => d Expr
 genExpr = depend typeOf <$> bind (genType 0) genExprOf
 
-genExprOf :: forall d. Syntax d => Type -> d Expr
-genExprOf ty = let ?mutant = NoMutant in arb 0 [] ty (10 :: Int) -- TODO Size
+genExprOf :: Syntax d => Type -> d Expr
+genExprOf ty = let ?mutant = NoMutant in arb ty 0 [] (20 :: Int)
   where
-    arb ftv c t 0 =
-      uniform $
-        [pure Con | t == Base]
-          ++ [pure (Var i) | (i, t') <- zip [0 ..] c, t == t']
-          ++ [lam <$> (pure t1 <*> arb ftv (t1 : c) t2 0) | t1 :-> t2 <- [t]]
-          ++ [tlam <$> arb (ftv + 1) (map (let ?mutant = NoMutant in liftType 0) c) t1 0 | ForAll t1 <- [t]]
-    arb ftv c t n =
+    arb t ftv ctx n =
       select
-        "CONSTRUCTOR"
-        [ arb ftv c t 0,
-          uniform $
-            [lam <$> (pure t1 <*> arb ftv (t1 : c) t2 (n - 1)) | t1 :-> t2 <- [t]]
-              ++ [tlam <$> arb (ftv + 1) (map (let ?mutant = NoMutant in liftType 0) c) t1 (n - 1) | ForAll t1 <- [t]],
-          depend (unGenApp ftv c)
-            <$> bind
-              (uniform (map pure . nub $ michal c t))
-              (genApp ftv c t n),
-          depend (unGenApp ftv c)
-            <$> bind
-              (genType ftv)
-              (genApp ftv c t n),
-          depend
-            ( \case
-                TApp e t' -> fmap (,t') (typeOf' ftv c e)
-                _ -> Nothing
-            )
-            <$> bind
-              (genT1T2 t)
-              (\(t1, t2) -> tapp <$> (arb ftv c t1 (n - 1) <*> pure t2))
+        "EXPR"
+        [ varsOfType t ctx,
+          genForType t ftv ctx n,
+          genApp t ftv ctx n,
+          genTApp t ftv ctx n
         ]
 
-    genApp ftv c t n t2 = app <$> (arb ftv c (t2 :-> t) (n `div` 2) <*> arb ftv c t2 (n `div` 2))
-    unGenApp ftv c = \case
-      _ :@: e2 -> typeOf' ftv c e2
-      _ -> Nothing
+    varsOfType t ctx = uniform [pure (Var i) | (i, t') <- zip [0 ..] ctx, t == t']
+
+    genForType Base _ _ _ = pure Con
+    genForType (ForAll t) ftv ctx n = tlam <$> arb t (ftv + 1) (map (liftType 0) ctx) (n - 1)
+    genForType (t1 :-> t2) ftv ctx n = lam <$> (pure t1 <*> arb t2 ftv (t1 : ctx) (n - 1))
+    genForType (TVar _) _ _ _ = empty
+    genForType TBool _ _ _ = error "generator does not use Boolean expressions"
+
+    genApp _ _ _ n | n <= 0 = empty
+    genApp t ftv ctx n =
+      depend cutType
+        <$> bind
+          (select "APP" [genType ftv, uniform (map pure . nub $ michal ctx t)])
+          (\t2 -> app <$> (arb (t2 :-> t) ftv ctx (n `div` 2) <*> arb t2 ftv ctx (n `div` 2)))
+      where
+        cutType (_ :@: e2) = typeOf' ftv ctx e2
+        cutType _ = Nothing
+
+    genTApp _ _ _ n | n <= 0 = empty
+    genTApp t ftv ctx n =
+      depend tappPair
+        <$> bind
+          (genT1T2 t)
+          (\(t1, t2) -> tapp <$> (arb t1 ftv ctx (n - 1) <*> pure t2))
+      where
+        tappPair (TApp e t') = fmap (,t') (typeOf' ftv ctx e)
+        tappPair _ = Nothing
 
 michal :: [Type] -> Type -> [Type]
 michal c t =
