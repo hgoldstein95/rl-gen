@@ -17,11 +17,11 @@ import ParserGen
 import Test.QuickCheck (Property, forAll, quickCheck)
 import Prelude hiding (id, pure, sum, (*>), (.), (<$>), (<*), (<*>))
 
-data Ty = TInt | Ty :->: Ty
+data Type = TInt | Type :->: Type
   deriving (Show, Eq)
 
-funTy :: Iso (Ty, Ty) Ty
-funTy =
+funType :: Iso (Type, Type) Type
+funType =
   Iso
     (Just . uncurry (:->:))
     ( \case
@@ -29,7 +29,7 @@ funTy =
         _ -> Nothing
     )
 
-data Expr = Lit Int | Plus Expr Expr | Lam Ty Expr | Var Int | Expr :@: Expr
+data Expr = Lit Int | Plus Expr Expr | Lam Type Expr | Var Int | Expr :@: Expr
   deriving (Show, Eq)
 
 lit :: Iso Int Expr
@@ -41,7 +41,7 @@ lit =
         _ -> Nothing
     )
 
-lam :: Iso (Ty, Expr) Expr
+lam :: Iso (Type, Expr) Expr
 lam =
   Iso
     (Just . uncurry Lam)
@@ -68,10 +68,10 @@ plus =
         _ -> Nothing
     )
 
-typeOf :: Expr -> Maybe Ty
+typeOf :: Expr -> Maybe Type
 typeOf expr = runReaderT (aux expr) []
   where
-    aux :: Expr -> ReaderT [Ty] Maybe Ty
+    aux :: Expr -> ReaderT [Type] Maybe Type
     aux (Lit _) = return TInt
     aux (Plus e1 e2) = do
       TInt <- aux e1
@@ -89,18 +89,18 @@ typeOf expr = runReaderT (aux expr) []
       ctx <- ask
       if length ctx <= n then lift Nothing else return (ctx !! n)
 
-genType :: Syntax d => d Ty
+genType :: Syntax d => d Type
 genType = aux (10 :: Int)
   where
     aux 0 = pure TInt
-    aux n = select "TYPE" [pure TInt, funTy <$> (aux (n `div` 2) <*> aux (n `div` 2))]
+    aux n = select "TYPE" [pure TInt, funType <$> (aux (n `div` 2) <*> aux (n `div` 2))]
 
-genExprOf :: Syntax d => Ty -> d Expr
-genExprOf ty = aux ty [] (30 :: Int)
+genExprOf :: Syntax d => Type -> d Expr
+genExprOf ty = arb ty [] (30 :: Int)
   where
-    aux t ctx n = select "EXPR" [genForType t ctx n, genApp t ctx n, varsOfType t ctx]
+    arb t ctx n = select "EXPR" [genForType t ctx n, genApp t ctx n, varsOfType t ctx]
 
-    varsOfType t ctx = uniform [pure (Var x) | x <- map fst $ filter ((== t) . snd) $ zip [0 ..] ctx]
+    varsOfType t ctx = uniform [pure (Var i) | (i, t') <- zip [0 ..] ctx, t' == t]
 
     cutType (_ :@: e) = typeOf e
     cutType _ = Nothing
@@ -111,7 +111,7 @@ genExprOf ty = aux ty [] (30 :: Int)
         <$> bind
           genType
           ( \t' ->
-              app <$> (aux (t' :->: t) ctx (n `div` 2) <*> aux t' ctx (n `div` 2))
+              app <$> (arb (t' :->: t) ctx (n `div` 2) <*> arb t' ctx (n `div` 2))
           )
 
     genLit = lit <$> select "LIT" (fmap pure [-20 .. 20])
@@ -121,9 +121,9 @@ genExprOf ty = aux ty [] (30 :: Int)
       select
         "INT"
         [ genLit,
-          plus <$> (aux TInt ctx (n `div` 2) <*> aux TInt ctx (n `div` 2))
+          plus <$> (arb TInt ctx (n `div` 2) <*> arb TInt ctx (n `div` 2))
         ]
-    genForType (t1 :->: t2) ctx n = lam <$> (pure t1 <*> aux t2 (t1 : ctx) n)
+    genForType (t1 :->: t2) ctx n = lam <$> (pure t1 <*> arb t2 (t1 : ctx) n)
 
 genExpr :: Syntax d => d Expr
 genExpr = depend typeOf <$> bind genType genExprOf
