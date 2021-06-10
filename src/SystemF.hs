@@ -399,7 +399,7 @@ genExpr :: Syntax d => d Expr
 genExpr = depend typeOf <$> bind (genType 0) genExprOf
 
 genExprOf :: Syntax d => Type -> d Expr
-genExprOf ty = let ?mutant = NoMutant in arb ty 0 [] (20 :: Int)
+genExprOf ty = let ?mutant = NoMutant in arb ty 0 [] (10 :: Int)
   where
     arb t ftv ctx n =
       select
@@ -437,6 +437,13 @@ genExprOf ty = let ?mutant = NoMutant in arb ty 0 [] (20 :: Int)
       where
         tappPair (TApp e t') = fmap (,t') (typeOf' ftv ctx e)
         tappPair _ = Nothing
+
+-- Generate t1 t2 such that t1{0:=t2} = t
+genT1T2 :: Syntax d => Type -> d (Type, Type)
+genT1T2 ty =
+  let t' = let ?mutant = NoMutant in liftType 0 ty
+   in depend (Just . snd)
+        <$> bind (fetchSubType t') (\t2 -> (forall <$> replaceSubType 0 t2 t') <*> pure t2)
 
 michal :: [Type] -> Type -> [Type]
 michal c t =
@@ -479,13 +486,6 @@ replaceSubType n s t =
       uniform [do arrow <$> (replaceSubType n s t1 <*> replaceSubType n s t2) | t1 :-> t2 <- [t]],
       uniform [do forall <$> replaceSubType (n + 1) s t' | ForAll t' <- [t], t' == s]
     ]
-
--- Generate t1 t2 such that t1{0:=t2} = t
-genT1T2 :: Syntax d => Type -> d (Type, Type)
-genT1T2 ty =
-  let t' = let ?mutant = NoMutant in liftType 0 ty
-   in depend (Just . snd)
-        <$> bind (fetchSubType t') (\t2 -> (forall <$> replaceSubType 0 t2 t') <*> pure t2)
 
 prop_genExprOfOK :: Property
 prop_genExprOfOK =
