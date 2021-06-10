@@ -1,4 +1,8 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wall #-}
@@ -9,6 +13,8 @@ import BST (BST (..), prune)
 import qualified BST
 import Control.Arrow (Arrow (second))
 import Control.Monad (MonadPlus (mplus), liftM2, (>=>))
+import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT))
+import Control.Monad.State (MonadState (get, put), StateT (..))
 import Control.Monad.Trans (lift)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -174,14 +180,6 @@ instance Syntax MGen where
 
 type Dist = Map String [Int]
 
-newtype OGen a = OGen {unOGen :: Dist -> GenT Maybe a}
-
-instance IsoFunctor OGen where
-  iso <$> OGen g = OGen $ g >=> \x -> lift (apply iso x)
-
-instance ProductFunctor OGen where
-  OGen g1 <*> OGen g2 = OGen $ \d -> g1 d >>= \x -> g2 d >>= \y -> return (x, y)
-
 freqShuffle :: MonadGen g => [(Int, a)] -> g [a]
 freqShuffle gs = do
   idxs <- aux (zip (map fst gs) [0 ..])
@@ -192,21 +190,74 @@ freqShuffle gs = do
       i <- frequency (map (second return) is)
       fmap (i :) (aux (filter ((/= i) . snd) is))
 
+newtype OGen a = OGen {unOGen :: ReaderT Dist (GenT Maybe) a}
+  deriving (Functor, Monad, Applicative, MonadReader Dist)
+
+instance IsoFunctor OGen where
+  iso <$> g = g >>= \x -> OGen $ lift (lift (apply iso x))
+
+instance ProductFunctor OGen where
+  g1 <*> g2 = g1 >>= \x -> g2 >>= (\y -> return (x, y))
+
 instance Syntax OGen where
-  pure x = OGen $ \_ -> return x
-  select s ds = OGen $ \m ->
-    lift =<< liftGen (aux m =<< freqShuffle (zip (Map.findWithDefault [1 ..] s m) [0 .. length ds - 1]))
+  pure x = return x
+  select s ds = do
+    m <- ask
+    OGen . lift $ lift =<< liftGen (aux m =<< freqShuffle (zip (Map.findWithDefault [1 ..] s m) [0 .. length ds - 1]))
     where
       aux m (i : is) = do
-        runGenT (unOGen (ds !! i) m) >>= \case
+        runGenT (runReaderT (unOGen (ds !! i)) m) >>= \case
           Nothing -> aux m is
           Just x -> return (Just x)
       aux _ [] = return Nothing
-  bind (OGen ma) f = OGen $ \m -> do
-    a <- ma m
-    b <- unOGen (f a) m
+  bind ma f = do
+    a <- ma
+    b <- f a
     return (a, b)
-  empty = OGen $ \_ -> lift Nothing
+  empty = OGen $ lift (lift Nothing)
+  uniform = select ""
+
+-- | This is essentially a Q-table. It maps (ChoicePoint, State) -> Freqs
+type ChoiceState = [(String, Int)]
+
+type ChoiceTable = Map (String, ChoiceState) [Int]
+
+newtype SGen a = SGen {unSGen :: StateT ChoiceState (ReaderT ChoiceTable (GenT Maybe)) a}
+  deriving (Functor, Monad, Applicative, MonadReader ChoiceTable, MonadState ChoiceState)
+
+instance IsoFunctor SGen where
+  iso <$> g = g >>= \x -> SGen $ lift . lift . lift $ apply iso x
+
+instance ProductFunctor SGen where
+  g1 <*> g2 = g1 >>= \x -> g2 >>= (\y -> return (x, y))
+
+liftMaybe :: Maybe a -> SGen a
+liftMaybe = SGen . lift . lift . lift
+
+instance Syntax SGen where
+  pure x = return x
+  select sid ds = do
+    s <- get
+    m <- ask
+    let tryGenerators = \case
+          (i : is) -> do
+            runGenT (runReaderT (runStateT (unSGen (ds !! i)) s) m) >>= \case
+              Nothing -> tryGenerators is
+              Just (x, s') -> return (Just (x, s', i))
+          [] -> return Nothing
+
+    let is = Map.findWithDefault [1 ..] (sid, s) m
+    (x, s', i) <-
+      SGen . lift . lift $
+        lift =<< liftGen (freqShuffle (zip is [0 .. length ds - 1]) >>= tryGenerators)
+    put (s' ++ [(sid, i)])
+    return x
+
+  bind ma f = do
+    a <- ma
+    b <- f a
+    return (a, b)
+  empty = liftMaybe Nothing
   uniform = select ""
 
 ungenerate :: Printer a -> a -> Dist
@@ -219,7 +270,7 @@ generate_ :: MGen a -> Gen a
 generate_ = fmap fromJust . runGenT . unMGen
 
 generateFreq :: Dist -> OGen a -> IO a
-generateFreq m = fmap fromJust . QC.generate . runGenT . ($ normalizeFreqs m) . unOGen
+generateFreq m = fmap fromJust . QC.generate . runGenT . (`runReaderT` normalizeFreqs m) . unOGen
   where
     normalizeFreqs = Map.map (map (\i -> if i > 0 then i * 100 else 1)) -- Is this right?
 
