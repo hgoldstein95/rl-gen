@@ -33,6 +33,7 @@ dependencies:
 - data-fix
 - parsec
 - MonadRandom
+- constraints
 
 ghc-options:
   - -Wall

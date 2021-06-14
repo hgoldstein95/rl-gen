@@ -1,65 +1,158 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 
 module IsoCat where
 
-import Control.Monad (liftM2, (>=>))
+import BST (BST (..))
+import Control.Monad (mplus)
+import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT))
 import Control.Monad.Trans (lift)
-import QuickCheck.GenT (GenT)
-import Prelude hiding (Functor (..), id, (.))
+import Control.Monad.Writer (MonadWriter (..), WriterT (runWriterT), execWriterT)
+import Data.Maybe (fromJust)
+import QuickCheck.GenT (MonadGen (..), oneof)
+import STLCExample (Expr (..), Type (..), typeOf)
+import qualified Test.QuickCheck as QC
 
-class Category cat where
-  id :: cat a a
-  (.) :: cat b c -> cat a b -> cat a c
+type Iso a b = (a -> b, b -> Maybe a)
 
-instance Category (->) where
-  id a = a
-  (g . f) a = g (f a)
+class (forall a. Functor (p a)) => Profunctor p where
+  comap :: (u -> Maybe u') -> p u' v -> p u v
 
-newtype a ~> b = KM {unKM :: a -> Maybe b}
+class (Profunctor p, forall a. Monad (p a)) => Profmonad p
 
-instance Category (~>) where
-  id = KM Just
-  (KM g) . (KM f) = KM (f >=> g)
+(<$$>) :: forall p a b. Profunctor p => Iso a b -> p a a -> p b b
+(f, b) <$$> p = comap b (fmap f p)
 
-data Iso cat a b = Iso (cat a b) (cat b a)
+infixr 0 <$$>
 
-type (<~>) = Iso (~>)
+(<**>) :: forall p a b. Profmonad p => p a a -> p b b -> p (a, b) (a, b)
+px <**> py = do
+  x <- comap mfst px
+  y <- comap msnd py
+  return (x, y)
+  where
+    mfst (x, _) = Just x
+    msnd (_, y) = Just y
 
-instance Category (<~>) where
-  id = Iso (KM Just) (KM Just)
-  (Iso (KM f) (KM f')) . (Iso (KM g) (KM g')) = Iso (KM (g >=> f)) (KM (f' >=> g'))
+infixl 4 <**>
 
-class (Category c, Category d) => Functor c d f where
-  fmap :: c a b -> d (f a) (f b)
+class (Profmonad g) => BiGen g where
+  base :: Eq a => a -> g a a
+  select :: String -> [g a a] -> g a a
+  uniform :: [g a a] -> g a a
 
-(<$>) :: (Category c, Functor c (->) f) => c a b -> f a -> f b
-(<$>) = fmap
+type Choice = (String, Int)
 
-class Functor (<~>) (->) m => IsoMonad m where
-  pure :: Eq a => a -> m a
-  bind :: m a -> (a -> m b) -> (b ~> a) -> m b
+newtype Ungen b a = Ungen {runUngen :: ReaderT b (WriterT [Choice] Maybe) a}
+  deriving (Functor, Applicative, Monad, MonadReader b, MonadWriter [Choice], MonadFail)
 
-newtype Gen a = Gen {runGen :: GenT Maybe a}
+instance Profunctor Ungen where
+  comap f g = do
+    u <- ask
+    case f u of
+      Nothing -> fail ""
+      Just u' -> Ungen . lift $ runReaderT (runUngen g) u'
 
-instance Functor (<~>) (->) Gen where
-  fmap (Iso (KM f) _) ma = Gen $ runGen ma >>= lift . f
+instance Profmonad Ungen
 
-instance IsoMonad Gen where
-  pure = Gen . return
-  bind (Gen ma) f _ = Gen $ do
-    a <- ma
-    runGen (f a)
+firstJust :: Foldable t => t (Ungen r a) -> Ungen r a
+firstJust ps =
+  Ungen $ do
+    r <- ask
+    (x, c) <-
+      lift . lift $
+        foldr
+          (mplus . (runWriterT . (`runReaderT` r) . runUngen))
+          Nothing
+          ps
+    tell c
+    pure x
 
-newtype Ungen a = Ungen {runUngen :: a -> Maybe [(String, Int)]}
+instance BiGen Ungen where
+  base x = ask >>= \y -> if x == y then pure x else fail ""
+  select s ds =
+    firstJust $
+      zipWith
+        (\i d -> tell [(s, i)] *> d)
+        [0 ..]
+        ds
+  uniform = firstJust
 
-instance Functor (<~>) (->) Ungen where
-  fmap (Iso _ (KM g)) (Ungen pa) = Ungen (g >=> pa)
+newtype Gen b a = Gen {runGen :: QC.Gen a}
+  deriving (Functor, Applicative, Monad, MonadGen)
 
-instance IsoMonad Ungen where
-  pure x = Ungen $ \y -> if x == y then Just [] else Nothing
-  bind (Ungen p) f (KM g) =
-    Ungen $ \b -> g b >>= \a -> liftM2 (++) (p a) (runUngen (f a) b)
+instance Profunctor Gen where
+  comap _ (Gen g) = Gen g
+
+instance Profmonad Gen
+
+instance BiGen Gen where
+  base = pure
+  select _ = oneof
+  uniform = oneof
+
+ungenerate :: Ungen a a -> a -> [Choice]
+ungenerate u x = fromJust . execWriterT . (`runReaderT` x) . runUngen $ u
+
+generate :: Gen a a -> IO a
+generate = QC.generate . runGen
+
+genTree :: forall g. BiGen g => g BST BST
+genTree =
+  select "Tree" [base Leaf, node <$$> genTree <**> genInt <**> genTree] -- TODO: Base
+  where
+    node = (\((l, x), r) -> Node l x r, \case Node l x r -> Just ((l, x), r); _ -> Nothing)
+    genInt = select "Int" [base x | x <- [0 .. 10]]
+
+funType :: Iso (Type, Type) Type
+funType = (uncurry (:->:), \case t1 :->: t2 -> Just (t1, t2); _ -> Nothing)
+
+lit :: Iso Int Expr
+lit = (Lit, \case Lit l -> Just l; _ -> Nothing)
+
+lam :: Iso (Type, Expr) Expr
+lam = (uncurry Lam, \case Lam t e -> Just (t, e); _ -> Nothing)
+
+app :: Iso (Expr, Expr) Expr
+app = (uncurry (:@:), \case e1 :@: e2 -> Just (e1, e2); _ -> Nothing)
+
+plus :: Iso (Expr, Expr) Expr
+plus = (uncurry Plus, \case Plus e1 e2 -> Just (e1, e2); _ -> Nothing)
+
+genType :: BiGen g => g Type Type
+genType = aux (10 :: Int)
+  where
+    aux 0 = base TInt
+    aux n = select "TYPE" [base TInt, funType <$$> aux (n `div` 2) <**> aux (n `div` 2)]
+
+genExprOf :: BiGen g => Type -> g Expr Expr
+genExprOf ty = arb ty [] (30 :: Int)
+  where
+    arb t ctx n = select "EXPR" $ [genForType t ctx n, varsOfType t ctx] ++ [genApp t ctx n | n /= 0]
+
+    varsOfType t ctx = uniform [base (Var i) | (i, t') <- zip [0 ..] ctx, t' == t]
+
+    cutType (_ :@: e) = typeOf e
+    cutType _ = Nothing
+
+    genApp t ctx n = do
+      t' <- comap cutType genType
+      app <$$> arb (t' :->: t) ctx (n `div` 2) <**> arb t' ctx (n `div` 2)
+
+    genLit = lit <$$> select "LIT" [base x | x <- [-20 .. 20]]
+
+    genForType TInt _ 0 = genLit
+    genForType TInt ctx n =
+      select
+        "INT"
+        [ genLit,
+          plus <$$> arb TInt ctx (n `div` 2) <**> arb TInt ctx (n `div` 2)
+        ]
+    genForType (t1 :->: t2) ctx n = lam <$$> base t1 <**> arb t2 (t1 : ctx) n
+
+genExpr :: BiGen g => g Expr Expr
+genExpr = do
+  t <- comap typeOf genType
+  genExprOf t

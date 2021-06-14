@@ -14,7 +14,7 @@ import qualified BST
 import Control.Arrow (Arrow (second))
 import Control.Monad (MonadPlus (mplus), liftM2, (>=>))
 import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT))
-import Control.Monad.State (MonadState (get, put), StateT (..))
+import Control.Monad.State (MonadState (get, put), StateT (..), evalStateT)
 import Control.Monad.Trans (lift)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -218,30 +218,30 @@ instance Syntax OGen where
   uniform = select ""
 
 -- | This is essentially a Q-table. It maps (ChoicePoint, State) -> Freqs
-type ChoiceState = [(String, Int)]
+type ChoiceTable s = Map (String, s) [Int]
 
-type ChoiceTable = Map (String, ChoiceState) [Int]
+type StateAbstraction s = (String, Int) -> s -> s
 
-newtype SGen a = SGen {unSGen :: StateT ChoiceState (ReaderT ChoiceTable (GenT Maybe)) a}
-  deriving (Functor, Monad, Applicative, MonadReader ChoiceTable, MonadState ChoiceState)
+newtype SGen s a = SGen {unSGen :: StateT s (ReaderT (ChoiceTable s, StateAbstraction s) (GenT Maybe)) a}
+  deriving (Functor, Monad, Applicative, MonadReader (ChoiceTable s, StateAbstraction s), MonadState s)
 
-instance IsoFunctor SGen where
+instance IsoFunctor (SGen s) where
   iso <$> g = g >>= \x -> SGen $ lift . lift . lift $ apply iso x
 
-instance ProductFunctor SGen where
+instance ProductFunctor (SGen s) where
   g1 <*> g2 = g1 >>= \x -> g2 >>= (\y -> return (x, y))
 
-liftMaybe :: Maybe a -> SGen a
+liftMaybe :: Maybe a -> SGen s a
 liftMaybe = SGen . lift . lift . lift
 
-instance Syntax SGen where
+instance Ord s => Syntax (SGen s) where
   pure x = return x
   select sid ds = do
     s <- get
-    m <- ask
+    r@(m, sAbs) <- ask
     let tryGenerators = \case
           (i : is) -> do
-            runGenT (runReaderT (runStateT (unSGen (ds !! i)) s) m) >>= \case
+            runGenT (runReaderT (runStateT (unSGen (ds !! i)) s) r) >>= \case
               Nothing -> tryGenerators is
               Just (x, s') -> return (Just (x, s', i))
           [] -> return Nothing
@@ -250,7 +250,7 @@ instance Syntax SGen where
     (x, s', i) <-
       SGen . lift . lift $
         lift =<< liftGen (freqShuffle (zip is [0 .. length ds - 1]) >>= tryGenerators)
-    put (s' ++ [(sid, i)])
+    put (sAbs (sid, i) s')
     return x
 
   bind ma f = do
@@ -273,6 +273,9 @@ generateFreq :: Dist -> OGen a -> IO a
 generateFreq m = fmap fromJust . QC.generate . runGenT . (`runReaderT` normalizeFreqs m) . unOGen
   where
     normalizeFreqs = Map.map (map (\i -> if i > 0 then i * 100 else 1)) -- Is this right?
+
+generateTable :: s -> StateAbstraction s -> ChoiceTable s -> SGen s a -> IO a
+generateTable initState absFn table = fmap fromJust . QC.generate . runGenT . (`runReaderT` (table, absFn)) . (`evalStateT` initState) . unSGen
 
 invertFreqs :: [Int] -> [Int]
 invertFreqs is =

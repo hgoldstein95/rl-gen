@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: c8ccf7194edfa11e1d8a36cf112aba189453f546755cf600f63bb67b5d6b3568
+-- hash: 5b508f1c96f60180ccc4ba3c7633f2a3879bbbe06e8a0f3056516e87d8247a7e
 
 name:           rl-gen
 version:        0.1.0.0
@@ -53,6 +53,7 @@ library
     , QuickCheck
     , QuickCheck-GenT
     , base >=4.7 && <5
+    , constraints
     , containers
     , data-default
     , data-fix
@@ -76,6 +77,7 @@ executable rl-gen-exe
     , QuickCheck
     , QuickCheck-GenT
     , base >=4.7 && <5
+    , constraints
     , containers
     , data-default
     , data-fix
@@ -101,6 +103,7 @@ test-suite rl-gen-test
     , QuickCheck
     , QuickCheck-GenT
     , base >=4.7 && <5
+    , constraints
     , containers
     , data-default
     , data-fix
