@@ -1,17 +1,21 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE QuantifiedConstraints #-}
 
 module IsoCat where
 
 import BST (BST (..))
-import Control.Monad (mplus)
-import Control.Monad.Reader (MonadReader (ask), ReaderT (runReaderT))
-import Control.Monad.Trans (lift)
+import Control.Arrow (second)
+import Control.Monad.Reader (MonadReader (..), ReaderT (runReaderT), asks)
+import Control.Monad.State
 import Control.Monad.Writer (MonadWriter (..), WriterT (runWriterT), execWriterT)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe (fromJust)
-import QuickCheck.GenT (MonadGen (..), oneof)
+import QuickCheck.GenT (GenT, MonadGen (..), frequency, oneof, runGenT)
 import STLCExample (Expr (..), Type (..), typeOf)
 import qualified Test.QuickCheck as QC
 
@@ -156,3 +160,58 @@ genExpr :: BiGen g => g Expr Expr
 genExpr = do
   t <- comap typeOf genType
   genExprOf t
+
+type RLCtx = [(String, Int)]
+
+type RLModel = Map (String, RLCtx) [Int]
+
+newtype RLGen b a = RLGen {runRLGen :: GenT (ReaderT RLModel (State RLCtx)) a}
+  deriving (Functor, Applicative, Monad, MonadGen)
+
+instance MonadState RLCtx (RLGen b) where
+  get = RLGen $ lift get
+  put x = RLGen $ lift (put x)
+
+instance MonadReader RLModel (RLGen b) where
+  ask = RLGen $ lift ask
+  local f (RLGen g) = do
+    r <- ask
+    s <- get
+    (a, s') <- liftGen $ do
+      x <- runGenT g
+      let g' = local f x
+      pure $ runState (runReaderT g' r) s
+    put s'
+    pure a
+
+freqShuffle :: MonadGen g => [(Int, a)] -> g [a]
+freqShuffle gs = do
+  idxs <- aux (zip (map fst gs) [0 ..])
+  return $ map (snd . (gs !!)) idxs
+  where
+    aux [] = return []
+    aux is = do
+      i <- frequency (map (second return) is)
+      fmap (i :) (aux (filter ((/= i) . snd) is))
+
+applyModel :: String -> [RLGen b a] -> RLGen b (Int, a)
+applyModel s gs = do
+  ctx <- get
+  is <- asks (Map.findWithDefault [] (s, ctx))
+  i <- frequency (zip is (pure <$> [0 ..]))
+  a <- gs !! i
+  pure (i, a)
+
+instance Profunctor RLGen where
+  comap _ (RLGen g) = RLGen g
+
+instance Profmonad RLGen
+
+instance BiGen RLGen where
+  base = pure
+  select s gs = do
+    (i, g) <- applyModel s gs
+    modify (take 4 . ((s, i) :))
+    pure g
+
+  uniform = oneof
