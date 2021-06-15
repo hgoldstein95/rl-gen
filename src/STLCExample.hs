@@ -17,19 +17,19 @@ import ParserGen
 import Test.QuickCheck (Property, forAll, quickCheck)
 import Prelude hiding (id, pure, sum, (*>), (.), (<$>), (<*), (<*>))
 
-data Type = TInt | Type :->: Type
+data Type = TInt | Fun Type Type
   deriving (Show, Eq)
 
 funType :: Iso (Type, Type) Type
 funType =
   Iso
-    (Just . uncurry (:->:))
+    (Just . uncurry Fun)
     ( \case
-        t1 :->: t2 -> Just (t1, t2)
+        Fun t1 t2 -> Just (t1, t2)
         _ -> Nothing
     )
 
-data Expr = Lit Int | Plus Expr Expr | Lam Type Expr | Var Int | Expr :@: Expr
+data Expr = Lit Int | Plus Expr Expr | Lam Type Expr | Var Int | App Expr Expr
   deriving (Show, Eq)
 
 lit :: Iso Int Expr
@@ -53,9 +53,9 @@ lam =
 app :: Iso (Expr, Expr) Expr
 app =
   Iso
-    (Just . uncurry (:@:))
+    (Just . uncurry App)
     ( \case
-        e1 :@: e2 -> Just (e1, e2)
+        App e1 e2 -> Just (e1, e2)
         _ -> Nothing
     )
 
@@ -79,9 +79,9 @@ typeOf expr = runReaderT (aux expr) []
       return TInt
     aux (Lam t e) = do
       t' <- local (t :) (aux e)
-      return (t :->: t')
-    aux (e1 :@: e2) = do
-      (t1 :->: t2) <- aux e1
+      return (Fun t t')
+    aux (App e1 e2) = do
+      (Fun t1 t2) <- aux e1
       t1' <- aux e2
       guard (t1 == t1')
       return t2
@@ -102,7 +102,7 @@ genExprOf ty = arb ty [] (30 :: Int)
 
     varsOfType t ctx = uniform [pure (Var i) | (i, t') <- zip [0 ..] ctx, t' == t]
 
-    cutType (_ :@: e) = typeOf e
+    cutType (App _ e) = typeOf e
     cutType _ = Nothing
 
     genApp _ _ 0 = empty
@@ -111,7 +111,7 @@ genExprOf ty = arb ty [] (30 :: Int)
         <$> bind
           genType
           ( \t' ->
-              app <$> (arb (t' :->: t) ctx (n `div` 2) <*> arb t' ctx (n `div` 2))
+              app <$> (arb (Fun t' t) ctx (n `div` 2) <*> arb t' ctx (n `div` 2))
           )
 
     genLit = lit <$> select "LIT" (fmap pure [-20 .. 20])
@@ -123,7 +123,7 @@ genExprOf ty = arb ty [] (30 :: Int)
         [ genLit,
           plus <$> (arb TInt ctx (n `div` 2) <*> arb TInt ctx (n `div` 2))
         ]
-    genForType (t1 :->: t2) ctx n = lam <$> (pure t1 <*> arb t2 (t1 : ctx) n)
+    genForType (Fun t1 t2) ctx n = lam <$> (pure t1 <*> arb t2 (t1 : ctx) n)
 
 genExpr :: Syntax d => d Expr
 genExpr = depend typeOf <$> bind genType genExprOf

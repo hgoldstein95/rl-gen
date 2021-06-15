@@ -43,7 +43,6 @@ px <**> py = do
 infixl 4 <**>
 
 class (Profmonad g) => BiGen g where
-  base :: Eq a => a -> g a a
   select :: String -> [g a a] -> g a a
   uniform :: [g a a] -> g a a
 
@@ -75,7 +74,6 @@ firstJust ps =
     pure x
 
 instance BiGen Ungen where
-  base x = ask >>= \y -> if x == y then pure x else fail ""
   select s ds =
     firstJust $
       zipWith
@@ -93,7 +91,6 @@ instance Profunctor Gen where
 instance Profmonad Gen
 
 instance BiGen Gen where
-  base = pure
   select _ = oneof
   uniform = oneof
 
@@ -103,15 +100,18 @@ ungenerate u x = fromJust . execWriterT . (`runReaderT` x) . runUngen $ u
 generate :: Gen a a -> IO a
 generate = QC.generate . runGen
 
+unit :: (BiGen g, Eq a) => a -> g a a
+unit x = comap (\y -> if x == y then Just x else Nothing) (pure x)
+
 genTree :: forall g. BiGen g => g BST BST
 genTree =
-  select "Tree" [base Leaf, node <$$> genTree <**> genInt <**> genTree] -- TODO: Base
+  select "Tree" [unit Leaf, node <$$> genTree <**> genInt <**> genTree]
   where
     node = (\((l, x), r) -> Node l x r, \case Node l x r -> Just ((l, x), r); _ -> Nothing)
-    genInt = select "Int" [base x | x <- [0 .. 10]]
+    genInt = select "Int" [unit x | x <- [0 .. 10]]
 
-funType :: Iso (Type, Type) Type
-funType = (uncurry (:->:), \case t1 :->: t2 -> Just (t1, t2); _ -> Nothing)
+fun :: Iso (Type, Type) Type
+fun = (uncurry Fun, \case Fun t1 t2 -> Just (t1, t2); _ -> Nothing)
 
 lit :: Iso Int Expr
 lit = (Lit, \case Lit l -> Just l; _ -> Nothing)
@@ -120,7 +120,7 @@ lam :: Iso (Type, Expr) Expr
 lam = (uncurry Lam, \case Lam t e -> Just (t, e); _ -> Nothing)
 
 app :: Iso (Expr, Expr) Expr
-app = (uncurry (:@:), \case e1 :@: e2 -> Just (e1, e2); _ -> Nothing)
+app = (uncurry App, \case App e1 e2 -> Just (e1, e2); _ -> Nothing)
 
 plus :: Iso (Expr, Expr) Expr
 plus = (uncurry Plus, \case Plus e1 e2 -> Just (e1, e2); _ -> Nothing)
@@ -128,33 +128,33 @@ plus = (uncurry Plus, \case Plus e1 e2 -> Just (e1, e2); _ -> Nothing)
 genType :: BiGen g => g Type Type
 genType = aux (10 :: Int)
   where
-    aux 0 = base TInt
-    aux n = select "TYPE" [base TInt, funType <$$> aux (n `div` 2) <**> aux (n `div` 2)]
+    aux 0 = unit TInt
+    aux n = select "Type" [unit TInt, fun <$$> aux (n `div` 2) <**> aux (n `div` 2)]
 
 genExprOf :: BiGen g => Type -> g Expr Expr
 genExprOf ty = arb ty [] (30 :: Int)
   where
-    arb t ctx n = select "EXPR" $ [genForType t ctx n, varsOfType t ctx] ++ [genApp t ctx n | n /= 0]
+    arb t ctx n = select "Expr" $ [genForType t ctx n, varsOfType t ctx] ++ [genApp t ctx n | n /= 0]
 
-    varsOfType t ctx = uniform [base (Var i) | (i, t') <- zip [0 ..] ctx, t' == t]
+    varsOfType t ctx = uniform [unit (Var i) | (i, t') <- zip [0 ..] ctx, t' == t]
 
-    cutType (_ :@: e) = typeOf e
+    cutType (App _ e) = typeOf e
     cutType _ = Nothing
 
     genApp t ctx n = do
       t' <- comap cutType genType
-      app <$$> arb (t' :->: t) ctx (n `div` 2) <**> arb t' ctx (n `div` 2)
+      app <$$> arb (Fun t' t) ctx (n `div` 2) <**> arb t' ctx (n `div` 2)
 
-    genLit = lit <$$> select "LIT" [base x | x <- [-20 .. 20]]
+    genLit = lit <$$> select "Lit" [unit x | x <- [-20 .. 20]]
 
     genForType TInt _ 0 = genLit
     genForType TInt ctx n =
       select
-        "INT"
+        "Int"
         [ genLit,
           plus <$$> arb TInt ctx (n `div` 2) <**> arb TInt ctx (n `div` 2)
         ]
-    genForType (t1 :->: t2) ctx n = lam <$$> base t1 <**> arb t2 (t1 : ctx) n
+    genForType (Fun t1 t2) ctx n = lam <$$> pure t1 <**> arb t2 (t1 : ctx) n
 
 genExpr :: BiGen g => g Expr Expr
 genExpr = do
@@ -208,7 +208,6 @@ instance Profunctor RLGen where
 instance Profmonad RLGen
 
 instance BiGen RLGen where
-  base = pure
   select s gs = do
     (i, g) <- applyModel s gs
     modify (take 4 . ((s, i) :))
